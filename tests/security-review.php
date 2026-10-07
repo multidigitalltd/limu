@@ -89,9 +89,69 @@ try {
     $sec_previous_month = ( new DateTimeImmutable( $sec_month . '-01', wp_timezone() ) )->modify( '-1 month' )->format( 'Y-m' );
     $sec_settings = LimuCRM\settings();
     $sec_settings['duplicate_mode'] = 'calendar';
+    $sec_settings['duplicate_days'] = 30;
     $sec_settings['start_date'] = $sec_month . '-01';
     $sec_settings['automatic'] = false;
     update_option( 'lcrm_settings', $sec_settings, false );
+
+    // Upgrade compatibility is response-only: old clients never receive stored retired mappings.
+    $sec_retired_settings = $sec_settings;
+    $sec_retired_settings['forms'] = array( 'retired-form' => array( 'institutions' => array( 999999 ), 'email' => 'private-field' ) );
+    update_option( 'lcrm_settings', $sec_retired_settings, false );
+    $sec_compat_bootstrap = sec_request( 'bootstrap' )->get_data();
+    sec_check( array() === $sec_compat_bootstrap['settings']['forms'] && $sec_retired_settings === get_option( 'lcrm_settings' ) && ! array_key_exists( 'forms', LimuCRM\settings() ), 'Bootstrap provides an empty legacy forms array without exposing or changing stored retired mappings' );
+    $sec_compat_settings = array( 'duplicate_mode' => 'rolling', 'duplicate_days' => 30, 'automatic' => true, 'start_date' => $sec_settings['start_date'] );
+    $sec_compat_input = $sec_compat_settings;
+    unset( $sec_compat_input['duplicate_days'] );
+    $sec_compat_save = sec_request( 'settings', $sec_compat_input + array( 'forms' => array() ) );
+    sec_check( 200 === $sec_compat_save->get_status() && $sec_compat_settings === $sec_compat_save->get_data() && $sec_compat_settings === get_option( 'lcrm_settings' ), 'Older settings clients can save their exact flags while the empty forms compatibility field is never persisted' );
+    foreach ( array( array( 'retired-form' => array() ), null, '', false, 0, (object) array(), array( array( 'malformed' ) ) ) as $sec_invalid_forms ) {
+        $sec_forms_rejected = sec_request( 'settings', $sec_compat_settings + array( 'forms' => $sec_invalid_forms ) );
+        sec_check( 400 === $sec_forms_rejected->get_status() && $sec_compat_settings === get_option( 'lcrm_settings' ), 'Settings reject nonempty, null, scalar, object or malformed legacy forms without modifying configuration: ' . wp_json_encode( $sec_invalid_forms ) );
+    }
+    foreach ( array( 'agreement', 'member', 'prepare', 'approve', 'payment', 'import', 'treatment', 'remap' ) as $sec_forms_route ) {
+        $sec_forms_rejected = sec_request( $sec_forms_route, array( 'forms' => array() ) );
+        sec_check( 400 === $sec_forms_rejected->get_status() && 'שדה לא תקין.' === $sec_forms_rejected->get_data()['message'], 'The empty legacy forms field is rejected before handling the ' . $sec_forms_route . ' mutation' );
+    }
+    sec_check( false === has_action( 'elementor_pro/forms/new_record', 'LimuCRM\\new_record' ) && false === has_action( 'elementor_pro/forms/validation', 'LimuCRM\\validate_turnstile' ), 'Legacy settings compatibility does not restore retired Elementor capture or validation hooks' );
+
+    foreach ( array( 'calendar', 'rolling', 'days_30', 'days_90', 'days_180', 'months_24', 'custom' ) as $sec_mode ) {
+        $sec_mode_settings = $sec_compat_settings;
+        $sec_mode_settings['duplicate_mode'] = $sec_mode;
+        $sec_mode_settings['duplicate_days'] = 47;
+        $sec_mode_response = sec_request( 'settings', $sec_mode_settings );
+        sec_check( 200 === $sec_mode_response->get_status() && $sec_mode_settings === get_option( 'lcrm_settings' ) && ( 'custom' === $sec_mode ? 'days:47' : $sec_mode ) === LimuCRM\duplicate_policy( LimuCRM\settings() ), 'The duplicate period is saved and resolved to its immutable delivery policy: ' . $sec_mode );
+    }
+    $sec_custom_missing = $sec_compat_input;
+    $sec_custom_missing['duplicate_mode'] = 'custom';
+    $sec_before_invalid_mode = get_option( 'lcrm_settings' );
+    sec_check( 400 === sec_request( 'settings', $sec_custom_missing )->get_status() && $sec_before_invalid_mode === get_option( 'lcrm_settings' ), 'A custom duplicate period requires an explicitly supplied day count, even when a previous count exists' );
+    foreach ( array( 0, 3651, -1, true, false, null, '1.5', 30.5, 'abc', '', array() ) as $sec_invalid_days ) {
+        $sec_invalid_custom = $sec_compat_settings;
+        $sec_invalid_custom['duplicate_mode'] = 'custom';
+        $sec_invalid_custom['duplicate_days'] = $sec_invalid_days;
+        sec_check( 400 === sec_request( 'settings', $sec_invalid_custom )->get_status() && $sec_before_invalid_mode === get_option( 'lcrm_settings' ), 'Invalid custom duplicate day counts cannot modify configuration: ' . wp_json_encode( $sec_invalid_days ) );
+    }
+    $sec_invalid_mode = $sec_compat_settings;
+    $sec_invalid_mode['duplicate_mode'] = 'unknown';
+    sec_check( 400 === sec_request( 'settings', $sec_invalid_mode )->get_status() && $sec_before_invalid_mode === get_option( 'lcrm_settings' ), 'Unknown duplicate period identifiers are rejected' );
+    foreach ( array( 1, 3650, '180' ) as $sec_valid_days ) {
+        $sec_valid_custom = $sec_compat_settings;
+        $sec_valid_custom['duplicate_mode'] = 'custom';
+        $sec_valid_custom['duplicate_days'] = $sec_valid_days;
+        $sec_valid_response = sec_request( 'settings', $sec_valid_custom );
+        sec_check( 200 === $sec_valid_response->get_status() && (int) $sec_valid_days === $sec_valid_response->get_data()['duplicate_days'], 'Custom duplicate windows accept valid integer bounds and normalize decimal digit input: ' . $sec_valid_days );
+    }
+    $sec_preserve_days = $sec_compat_input;
+    $sec_preserve_days['duplicate_mode'] = 'days_90';
+    $sec_preserve_response = sec_request( 'settings', $sec_preserve_days );
+    sec_check( 200 === $sec_preserve_response->get_status() && 180 === $sec_preserve_response->get_data()['duplicate_days'], 'Selecting a preset without a day field preserves the manager\'s previous custom day count' );
+    $sec_advanced_before_legacy = get_option( 'lcrm_settings' );
+    $sec_legacy_reset = $sec_compat_input;
+    $sec_legacy_reset['duplicate_mode'] = 'calendar';
+    sec_check( 409 === sec_request( 'settings', $sec_legacy_reset + array( 'forms' => array() ) )->get_status() && $sec_advanced_before_legacy === get_option( 'lcrm_settings' ), 'A cached legacy settings form cannot silently reset an advanced duplicate period to its calendar default' );
+    update_option( 'lcrm_settings', $sec_settings, false );
+
     sec_check( null === LimuCRM\money( true ) && null === LimuCRM\money( false ), 'Boolean values cannot become monetary amounts' );
     sec_check( null === LimuCRM\money( 1.25 ) && 125 === LimuCRM\money( '1.25' ) && 100 === LimuCRM\money( 1 ), 'Decimal money accepts exact decimal strings and integer units only' );
     $sec_tag = 'Security ' . wp_generate_uuid4();
@@ -310,6 +370,7 @@ try {
     wp_set_current_user( $sec_user_id );
     $sec_empty_bootstrap = sec_request( 'bootstrap' )->get_data();
     $sec_empty_deliveries = sec_request( 'deliveries' )->get_data();
+    sec_check( null === $sec_empty_bootstrap['settings'], 'Institution bootstrap cannot read manager settings or the legacy compatibility payload' );
     sec_check( array() === $sec_empty_bootstrap['institutions'] && 0 === $sec_empty_deliveries['total'] && array() === $sec_empty_deliveries['items'], 'Institution role without assignments exposes no institution or contact data' );
     $sec_empty_summary = sec_request( 'summary' )->get_data();
     sec_check( 0 === $sec_empty_summary['leads'] && 0 === $sec_empty_summary['approved'] && array() === $sec_empty_summary['by_institution'], 'All-period dashboard exposes no totals to an unassigned institution account' );

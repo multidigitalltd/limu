@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: Limu CRM — Multi Digital
- * Description: פורטל מוסדות, לידים וחיובים חודשי עם בקרת הרשאות. חיבור iCount בשלב נפרד.
- * Version: 0.1.2
+ * Plugin Name: crm
+ * Description: crm
+ * Version: 0.1.3
  * Requires at least: 6.6
  * Requires PHP: 7.4.33
  * License: GPL-2.0-or-later
@@ -17,6 +17,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 define( 'LIMU_CRM_FILE', __FILE__ );
+define( 'LIMU_CRM_VERSION', '0.1.3' );
+require_once __DIR__ . '/includes/assets.php';
 require_once __DIR__ . '/includes/domain.php';
 require_once __DIR__ . '/includes/store.php';
 require_once __DIR__ . '/includes/api.php';
@@ -24,6 +26,8 @@ require_once __DIR__ . '/includes/capture.php';
 require_once __DIR__ . '/includes/native.php';
 require_once __DIR__ . '/includes/security.php';
 require_once __DIR__ . '/includes/turnstile.php';
+require_once __DIR__ . '/includes/icount.php';
+require_once __DIR__ . '/includes/icount-api.php';
 
 /** Register private records and the portal route without loading frontend assets globally. */
 function register() {
@@ -76,6 +80,7 @@ register_deactivation_hook(
 	__FILE__,
 	function () {
 		wp_clear_scheduled_hook( 'lcrm_daily' );
+		wp_unschedule_hook( 'lcrm_icount_demand' );
 		flush_rewrite_rules();
 	}
 );
@@ -135,12 +140,12 @@ add_action(
 		header( 'X-Frame-Options: SAMEORIGIN' );
 		header( "Content-Security-Policy: frame-ancestors 'self'", false );
 		header( 'Referrer-Policy: no-referrer' );
-		wp_enqueue_style( 'limu-crm', plugins_url( 'assets/crm.min.css', LIMU_CRM_FILE ), array(), '0.1.2' );
+		wp_enqueue_style( 'limu-crm', plugins_url( 'assets/' . ASSETS['crm.css'], LIMU_CRM_FILE ), array(), LIMU_CRM_VERSION );
 		wp_enqueue_script(
 			'limu-crm-privacy',
-			plugins_url( 'assets/privacy.min.js', LIMU_CRM_FILE ),
+			plugins_url( 'assets/' . ASSETS['privacy.js'], LIMU_CRM_FILE ),
 			array(),
-			'0.1.2',
+			LIMU_CRM_VERSION,
 			array(
 				'in_footer' => true,
 				'strategy'  => 'defer',
@@ -149,9 +154,9 @@ add_action(
 		if ( can_view() ) {
 			wp_enqueue_script(
 				'limu-crm',
-				plugins_url( 'assets/crm.min.js', LIMU_CRM_FILE ),
+				plugins_url( 'assets/' . ASSETS['crm.js'], LIMU_CRM_FILE ),
 				array(),
-				'0.1.2',
+				LIMU_CRM_VERSION,
 				array(
 					'in_footer' => true,
 					'strategy'  => 'defer',
@@ -175,11 +180,11 @@ add_action(
 add_action(
 	'lcrm_daily',
 	function () {
-		$today = new \DateTimeImmutable( 'now', wp_timezone() );
-		$month = $today->modify( 'first day of last month' )->format( 'Y-m' );
-		locked(
+		$today  = new \DateTimeImmutable( 'now', wp_timezone() );
+		$month  = $today->modify( 'first day of last month' )->format( 'Y-m' );
+		$result = locked(
 			function () use ( $month ) {
-				$institutions = get_posts(
+				$institutions   = get_posts(
 					array(
 						'post_type'      => 'institutions',
 						'post_status'    => array( 'publish', 'draft' ),
@@ -188,6 +193,7 @@ add_action(
 						'no_found_rows'  => true,
 					)
 				);
+				$newly_approved = array();
 				foreach ( $institutions as $id ) {
 					if ( ! agreement( $id ) ) {
 						continue;
@@ -205,11 +211,16 @@ add_action(
 						);
 						if ( is_wp_error( $approved ) ) {
 												audit( 'automatic_error', $id, array( 'operation' => 'approve' ) );
+						} else {
+							$newly_approved[] = $approved['id'];
 						}
 					}
 				}
-				return true;
+				return $newly_approved;
 			}
 		);
+		if ( ! is_wp_error( $result ) ) {
+			icount_queue_demands( $result );
+		}
 	}
 );

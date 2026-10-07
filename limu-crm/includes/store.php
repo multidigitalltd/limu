@@ -65,6 +65,7 @@ function error( $message, $status = 400 ) {
 function settings() {
 	$defaults = array(
 		'duplicate_mode' => 'calendar',
+		'duplicate_days' => 30,
 		'automatic'      => false,
 		'start_date'     => '',
 	);
@@ -256,8 +257,36 @@ function query_records( $type, $filters = array(), $page = 1, $limit = 30, $sear
 			);
 		}
 	}
+	if ( isset( $filters['date_from'], $filters['date_to'] ) ) {
+		if ( 'lcrm_bill' === $type ) {
+			$meta[] = array(
+				'key'     => '_lcrm_month',
+				'value'   => array( substr( $filters['date_from'], 0, 7 ), substr( $filters['date_to'], 0, 7 ) ),
+				'compare' => 'BETWEEN',
+			);
+		} else {
+			$meta[] = array(
+				'key'     => '_lcrm_date',
+				'value'   => array( 'lcrm_payment' === $type ? $filters['date_from'] : $filters['date_from'] . ' 00:00:00', $filters['date_to'] . ' 23:59:59' ),
+				'compare' => 'BETWEEN',
+			);
+		}
+	}
 	foreach ( $filters as $key => $value ) {
+		if ( in_array( $key, array( 'date_from', 'date_to' ), true ) ) {
+			continue;
+		}
 		if ( '' !== $value && null !== $value ) {
+			if ( 'lcrm_payment' === $type && in_array( $key, array( 'month', 'year' ), true ) ) {
+				$first  = 'year' === $key ? $value . '-01-01' : $value . '-01';
+				$last   = 'year' === $key ? $value . '-12-31' : ( new \DateTimeImmutable( $first, wp_timezone() ) )->format( 'Y-m-t' );
+				$meta[] = array(
+					'key'     => '_lcrm_date',
+					'value'   => array( $first, $last . ' 23:59:59' ),
+					'compare' => 'BETWEEN',
+				);
+				continue;
+			}
 			if ( 'year' === $key ) {
 				$meta[] = array(
 					'key'     => '_lcrm_month',
@@ -352,13 +381,14 @@ function institution_deliveries( $id, $before = null, $after = null ) {
 /**
  * Record automatic source events against validated institutions.
  *
- * @param array  $lead Validated contact and delivery context.
- * @param int    $institution Server-validated recipient institution.
- * @param string $source Stable source idempotency key.
- * @param bool   $historical Whether delivery evidence is unverified historical data.
+ * @param array       $lead Validated contact and delivery context.
+ * @param int         $institution Server-validated recipient institution.
+ * @param string      $source Stable source idempotency key.
+ * @param bool        $historical Whether delivery evidence is unverified historical data.
+ * @param string|null $saved_policy Immutable server-side policy for delayed remapping.
  * @return mixed Operation result or validation error.
  */
-function record_delivery( $lead, $institution, $source, $historical = false ) {
+function record_delivery( $lead, $institution, $source, $historical = false, $saved_policy = null ) {
 	if ( ! is_array( $lead ) || ! is_string( $source ) || '' === $source || strlen( $source ) > 180 || ! isset( $lead['date'] ) || ! is_string( $lead['date'] ) || ! valid_date( substr( $lead['date'], 0, 10 ) ) || ! preg_match( '/^\d{4}-\d{2}-\d{2} (?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/D', $lead['date'] ) ) {
 		return error( 'פרטי מקור או מועד פנייה לא תקינים.' );
 	}
@@ -449,12 +479,13 @@ function record_delivery( $lead, $institution, $source, $historical = false ) {
 	$lead['contact'] = $contact_id;
 	$s               = settings();
 	$duplicate       = 0;
-	$start           = 'calendar' === $s['duplicate_mode'] ? substr( $lead['date'], 0, 4 ) . '-01-01 00:00:00' : ( new \DateTimeImmutable( $lead['date'], wp_timezone() ) )->modify( '-12 months' )->format( 'Y-m-d H:i:s' );
+	$policy          = null === $saved_policy ? duplicate_policy( $s ) : $saved_policy;
+	$start           = duplicate_window_start( $lead['date'], $policy );
 	foreach ( institution_deliveries( $institution, $lead['date'], $start ) as $previous ) {
 		if ( ! empty( $previous['duplicate_of'] ) || ( ! $historical && 'sent' !== $previous['state'] ) ) {
 			continue;
 		}
-		if ( same_contact( $lead, $previous ) && in_window( $previous['date'], $lead['date'], $s['duplicate_mode'] ) ) {
+		if ( same_contact( $lead, $previous ) && in_window( $previous['date'], $lead['date'], $policy ) ) {
 			$duplicate = $previous['id'];
 			break;
 		}
@@ -469,7 +500,7 @@ function record_delivery( $lead, $institution, $source, $historical = false ) {
 			'month'          => substr( $lead['date'], 0, 7 ),
 			'state'          => $historical ? 'historical' : 'sent',
 			'duplicate_of'   => $duplicate,
-			'duplicate_mode' => $s['duplicate_mode'],
+			'duplicate_mode' => $policy,
 			'bill'           => 0,
 		)
 	);
@@ -773,5 +804,9 @@ function rollback_caches() {
 		clean_user_cache( $id );
 		wp_cache_delete( $id, 'user_meta' );
 	}
-	wp_cache_delete( 'lcrm_settings', 'options' );
+	foreach ( array( 'lcrm_settings', 'lcrm_icount_config', 'lcrm_icount_automatic', 'lcrm_icount_namespace' ) as $option ) {
+		wp_cache_delete( $option, 'options' );
+	}
+	wp_cache_delete( 'notoptions', 'options' );
+	wp_cache_delete( 'alloptions', 'options' );
 }

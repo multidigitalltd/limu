@@ -18,15 +18,15 @@ const assert = require('node:assert/strict');
  const lead={id:91,name:hostile,institution:3,date:'2026-09-15 12:00:00',phone:hostile,email:hostile,form:hostile,duplicate_of:hostile,state:'historical',notes:[{at:'2026-09-15',text:hostile}],treatment:'new'};
  const pendingLead={...lead,id:93,name:'קליטה שלא הושלמה',state:'pending'};
  const bill={id:92,institution:3,month:'2026-09',state:'approved',total:1180,subtotal:1000,vat:180,paid:0,due:'2026-11-06',issued:'2026-10-07',duplicates:hostile,historical:hostile,lines:[{delivery:hostile,price:1000}]};
- let mode='normal',refreshFailure=false,pendingWrite=null,releaseWrite,writeStarted,lastSummaryQuery,lastReportQuery;
+ let mode='normal',refreshFailure=false,pendingWrite=null,releaseWrite,writeStarted,lastSummaryQuery,lastReportQuery,lastExportQuery;
  const writeStartedPromise=new Promise(resolve=>writeStarted=resolve);
  const checks=[],errors=[];page.on('pageerror',error=>errors.push(error.message));
  async function check(condition,label){assert.ok(condition,label);checks.push(label);console.log('PASS',label);}
  const json=(route,body,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(body)});
  try {
- await page.route('**/assets/crm.min.js*',route=>route.fulfill({path:path.resolve(__dirname,'../limu-crm/assets/crm.js'),contentType:'application/javascript'}));
- await page.route('**/assets/privacy.min.js*',route=>route.fulfill({path:path.resolve(__dirname,'../limu-crm/assets/privacy.js'),contentType:'application/javascript'}));
- await page.route('**/assets/crm.min.css*',route=>route.fulfill({path:path.resolve(__dirname,'../limu-crm/assets/crm.css'),contentType:'text/css'}));
+ await page.route(/\/assets\/(?:build\/)?crm(?:\.[a-f0-9]{12})?\.min\.js(?:\?|$)/,route=>route.fulfill({path:path.resolve(__dirname,'../limu-crm/assets/crm.js'),contentType:'application/javascript'}));
+ await page.route(/\/assets\/(?:build\/)?privacy(?:\.[a-f0-9]{12})?\.min\.js(?:\?|$)/,route=>route.fulfill({path:path.resolve(__dirname,'../limu-crm/assets/privacy.js'),contentType:'application/javascript'}));
+ await page.route(/\/assets\/(?:build\/)?crm(?:\.[a-f0-9]{12})?\.min\.css(?:\?|$)/,route=>route.fulfill({path:path.resolve(__dirname,'../limu-crm/assets/crm.css'),contentType:'text/css'}));
  await page.route('**/limu-crm/v1/**',async route=>{
   const url=new URL(route.request().url()),endpoint=url.pathname.split('/').at(-1);
   if(route.request().method()==='POST'){
@@ -41,6 +41,7 @@ const assert = require('node:assert/strict');
   if(endpoint==='deliveries')return json(route,{items:[lead,pendingLead],total:2,pages:1});
   if(endpoint==='report'&&url.searchParams.get('target')==='deliveries'){lastReportQuery=url.searchParams;return json(route,{items:[lead,pendingLead],total:2,pages:1});}
   if(endpoint==='bills'||endpoint==='report'){if(endpoint==='report')lastReportQuery=url.searchParams;return json(route,{items:[bill],total:1,pages:1});}
+  if(endpoint==='export'){lastExportQuery=url.searchParams;return json(route,{file:Buffer.from('Filtered export response fixture').toString('base64'),name:'filtered-fixture.xlsx',count:2});}
   if(endpoint==='audit')return json(route,{items:[{at:'2026-10-07',event:hostile,actor:hostile,target:hostile}],total:1,pages:1});
   throw new Error('Unexpected fixture endpoint '+endpoint);
  });
@@ -50,6 +51,7 @@ const assert = require('node:assert/strict');
   await page.locator('#user_login').fill(credentials.user);await page.locator('#user_pass').fill(credentials.password);await page.getByRole('button',{name:'כניסה למערכת'}).click();
  }
  await page.getByRole('heading',{name:'סקירה כללית'}).waitFor();
+ await check(!(await page.locator('body').textContent()).includes('מרחב ניהול מאובטח'),'Portal omits the removed topbar wording');
  await check(await page.evaluate(()=>!window.__limuXss)&&await page.locator('#screen img').count()===0,'Dashboard counters and institution names escape hostile HTML');
  await check(await page.locator('#access-tools,#reading-guide,a[href*="m-d.co.il"]').count()===0&&await page.getByRole('link',{name:'הצהרת נגישות',exact:true}).count()===0,'Portal omits the removed toolbar, accessibility statement and credit');
  await page.locator('#missing-rates').click();await page.getByRole('heading',{name:'מוסדות ותעריפים',exact:true}).waitFor();
@@ -57,6 +59,11 @@ const assert = require('node:assert/strict');
  await page.locator('#institution-search').fill('מוסד עתידי');await check(await page.locator('[data-rate="2"]').count()===1&&await page.locator('[data-rate="3"]').count()===0,'Institution search refines the missing-rate list');await page.locator('[data-view="dashboard"]').click();await page.getByRole('heading',{name:'סקירה כללית',exact:true}).waitFor();
  await page.locator('#filter-period').selectOption('year');await page.locator('#filter-year').fill('2026');await page.getByRole('button',{name:'הצגת נתונים'}).click();await page.waitForFunction(()=>document.getElementById('screen').getAttribute('aria-busy')==='false');
  await check(lastSummaryQuery.get('year')==='2026'&&!lastSummaryQuery.get('month')&&(await page.locator('.period-chip').textContent()).includes('2026'),'Whole-year summary requests contain a year without a monthly constraint');
+ await check(await page.locator('.metrics .label').evaluateAll(labels=>labels.length===4&&labels.every(label=>label.textContent.includes('שנת 2026'))),'Every dashboard metric title identifies the selected full year');
+ await page.locator('#filter-period').selectOption('range');await page.locator('#filter-from').fill('2026-09-01');await page.locator('#filter-to').fill('2026-09-30');await page.getByRole('button',{name:'הצגת נתונים'}).click();await page.waitForFunction(()=>document.getElementById('screen').getAttribute('aria-busy')==='false');
+ await check(lastSummaryQuery.get('date_from')==='2026-09-01'&&lastSummaryQuery.get('date_to')==='2026-09-30'&&!lastSummaryQuery.get('month')&&!lastSummaryQuery.get('year')&&(await page.locator('.period-chip').textContent()).includes('2026-09-01 – 2026-09-30'),'Dashboard date-range request and label omit monthly and yearly constraints');
+ await page.locator('#filter-institution').selectOption('2');await page.getByRole('button',{name:'הצגת נתונים'}).click();await page.waitForFunction(()=>document.getElementById('screen').getAttribute('aria-busy')==='false');
+ await check(lastSummaryQuery.get('institution')==='2'&&await page.locator('.metrics .label').evaluateAll(labels=>labels.length===4&&labels.every(label=>label.textContent.includes('2026-09-01 – 2026-09-30')&&label.textContent.includes('מוסד עתידי'))),'Every dashboard metric title identifies both the selected date range and institution');
  await page.setViewportSize({width:390,height:844});
  await check(await page.getByRole('link',{name:'יציאה',exact:true}).isVisible(),'Mobile portal retains a usable logout control');
  await page.setViewportSize({width:1440,height:1000});
@@ -65,6 +72,11 @@ const assert = require('node:assert/strict');
  await page.locator('#filter-period').selectOption('year');await page.locator('#filter-year').fill('2026');await page.getByRole('button',{name:'הצגת נתונים'}).click();await page.waitForFunction(()=>document.getElementById('screen').getAttribute('aria-busy')==='false');
  await page.evaluate(()=>{window.print=()=>{};});await page.locator('#print-leads').click();await page.locator('#print-snapshot').waitFor({state:'attached'});
  await check(await page.evaluate(()=>!window.__limuXss)&&await page.locator('#print-snapshot img').count()===0&&(await page.locator('#print-snapshot').textContent()).includes('דוח לידים')&&await page.locator('#print-snapshot tbody tr').count()===2,'Lead PDF snapshot includes all matching records and escapes hostile contact data');await check(lastReportQuery.get('year')==='2026'&&!lastReportQuery.get('month')&&(await page.locator('#print-snapshot').textContent()).includes('שנת 2026'),'PDF lead report preserves the selected full year');await page.evaluate(()=>window.dispatchEvent(new Event('afterprint')));
+ await page.locator('#filter-period').selectOption('range');await page.locator('#filter-from').fill('2026-09-01');await page.locator('#filter-to').fill('2026-09-30');await page.getByRole('button',{name:'הצגת נתונים'}).click();await page.waitForFunction(()=>document.getElementById('screen').getAttribute('aria-busy')==='false');
+ await page.locator('#print-leads').click();await page.locator('#print-snapshot').waitFor({state:'attached'});
+ await check(lastReportQuery.get('date_from')==='2026-09-01'&&lastReportQuery.get('date_to')==='2026-09-30'&&!lastReportQuery.get('month')&&!lastReportQuery.get('year')&&(await page.locator('#print-snapshot').textContent()).includes('2026-09-01 – 2026-09-30'),'PDF lead report preserves both date-range boundaries without a month or year filter');await page.evaluate(()=>window.dispatchEvent(new Event('afterprint')));
+ const downloadStarted=page.waitForEvent('download');await page.locator('#export').click();const filteredDownload=await downloadStarted;
+ await check(lastExportQuery.get('date_from')==='2026-09-01'&&lastExportQuery.get('date_to')==='2026-09-30'&&!lastExportQuery.get('month')&&!lastExportQuery.get('year')&&filteredDownload.suggestedFilename()==='filtered-fixture.xlsx','Excel download preserves both date-range boundaries without a month or year filter');
  await page.locator('[data-view="bills"]').click();await page.getByRole('heading',{name:'חיובים ותשלומים',exact:true}).waitFor();await page.locator('[data-bill]').click();
  await check(await page.evaluate(()=>!window.__limuXss)&&await page.locator('dialog img').count()===0,'Billing counters and line references escape hostile HTML');await page.keyboard.press('Escape');
  await page.locator('[data-view="audit"]').click();await page.getByRole('heading',{name:'יומן פעילות',exact:true}).waitFor();
@@ -86,7 +98,9 @@ const assert = require('node:assert/strict');
  mode='expired';await page.locator('[data-view="deliveries"]').click();await page.getByRole('heading',{name:'לא ניתן לטעון את הנתונים'}).waitFor();
  await check(await page.locator('#retry').textContent()==='רענון והתחברות מחדש'&&(await page.locator('#load-error').textContent()).includes('ההתחברות פגה'),'Expired authentication explains recovery instead of retrying a stale nonce');
  mode='normal';await page.locator('[data-view="settings"]').click();await page.getByRole('heading',{name:'הגדרות והרשאות',exact:true}).waitFor();
+ await check(await page.locator('#settings-form').isVisible()&&await page.locator('#load-error').count()===0,'Current settings render when the bootstrap omits the retired forms property');
  await check(await page.getByRole('button',{name:'הוספת טופס'}).count()===0&&!/Elementor|חיבור טפסי/.test(await page.locator('#screen').textContent()),'Native capture requires no Elementor mapping in settings');
+ await check(await page.locator('#import,#import-progress').count()===0&&await page.getByRole('button',{name:'ייבוא היסטוריה',exact:true}).count()===0,'Settings omit the removed manual import interface');
  await page.evaluate(()=>{localStorage.setItem('limu-crm-display-v1','1');localStorage.setItem('limu-crm-privacy','malformed');localStorage.setItem('limu-crm-privacy-seen','malformed');});await page.reload();await page.getByRole('heading',{name:'סקירה כללית',exact:true}).waitFor();
  await check(await page.locator('#privacy-notice').isVisible(),'Malformed privacy acknowledgment and old display settings leave a usable privacy notice');await page.locator('#privacy-ack').click();await check(!(await page.locator('#privacy-notice').isVisible()),'Privacy acknowledgment dismisses its notice');
  await page.addInitScript(()=>{Object.defineProperty(Storage.prototype,'getItem',{configurable:true,value(){throw new DOMException('Storage disabled','SecurityError');}});Object.defineProperty(Storage.prototype,'setItem',{configurable:true,value(){throw new DOMException('Storage disabled','SecurityError');}});});

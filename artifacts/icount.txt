@@ -1,0 +1,75 @@
+PASS Absent server token produces a safe unconfigured state
+PASS Missing token refuses network requests
+PASS Header whitespace in server token is rejected
+PASS Manager explicitly verifies company, bank accounts and document types with mocked provider
+PASS Cached status exposes supported fiscal options and defaults automation off
+PASS Connection state never exposes secret or account fingerprint
+PASS Reading connection status does not contact provider
+PASS Caller cannot choose a provider destination
+PASS HTTP is rejected inside the CRM transaction
+PASS Institution links an explicit verified fiscal client ID
+PASS Fiscal client lookup sends only explicit ID, with no lead CID, name or contacts
+PASS Manager bootstrap exposes safe connection and institution mapping only
+PASS Manager previews verified fiscal identity before confirming the institution mapping
+PASS Concurrent second demand reservation is blocked before any HTTP
+PASS Approved monthly demand is created and read back before marking issued
+PASS Demand updates actual issue date and credit terms without changing approved financial snapshot
+PASS Provider payload preserves exact per-lead pricing and fixed eighteen percent VAT
+PASS Repeated issued demand returns existing document without external request
+PASS Manager issues one tax invoice after the demand
+PASS Tax invoice preserves verified demand origin
+PASS Partial bank-transfer payment creates only a receipt after existing invoice
+PASS Receipt carries actual payment, receiving bank ID and invoice link without taxing again
+PASS Final payment after partial receipt creates another receipt without another tax invoice
+PASS Tax invoice issued later inherits the demand deadline instead of restarting credit days
+PASS A single full payment without prior invoice creates invoice-receipt
+PASS Invoice-receipt prevents a second tax invoice for the bill
+PASS Partial payment without invoice requests explicit invoice first and creates no hidden document
+PASS Unlinked institution cannot issue a demand
+PASS Draft bill cannot create financial documents
+PASS Per-lead versus global VAT rounding ambiguity is rejected before HTTP
+PASS Document created with lost response persists an uncertain state
+PASS Ordinary issue click never retries an uncertain operation
+PASS Explicit same-day recovery uses official duplicate-sanity proof and creates no second document
+PASS Lost readback retains a proven provider document number in uncertain state
+PASS Known candidate recovery performs read-only document verification without create replay
+PASS Provider amount mismatch remains uncertain and never changes approved totals
+PASS Uncertain tax invoice blocks invoice-receipt and duplicate taxation
+PASS Reconciliation cannot attach an arbitrary same-amount document number
+PASS Uncertain demand from an earlier day without candidate cannot create a backdated demand
+PASS Fresh sending intent cannot be concurrently reconciled
+PASS Stale committed sending intent can be recovered explicitly with the same idempotency key
+PASS Changed institution client cannot receive a receipt based on another client invoice
+PASS Changed account token invalidates mappings and prevents cross-account issuance
+PASS Document links reject impersonation domains, plain HTTP, userinfo and nonstandard ports
+PASS Boolean and unknown transfer accounts are rejected
+PASS Cheque payload includes verified official fields with exact payment amount
+PASS Boolean cheque identifiers are rejected
+PASS Unsupported card and generic methods do not collect payment-card secrets or guess supplier codes
+PASS Different receiving bank in provider readback is rejected without pretending the document is verified
+PASS Full cheque payment issues and verifies all official cheque details
+PASS Failed local finalization preserves the committed sending intent and never reports success
+PASS Recovery after local write failure proves the existing fiscal document with the original sanity key
+PASS Actual issue date inconsistent with supplier due date remains uncertain instead of silently changing credit terms
+PASS Malformed provider JSON produces an uncertain operation
+PASS HTTP redirect is never followed or treated as an issued document
+PASS Accounting REST mutation requires a valid nonce
+PASS Accounting REST rejects unknown provider-routing fields
+PASS Accounting REST rejects boolean object identifiers
+PASS Accounting REST enforces its narrow body limit
+PASS Manager bill detail retrieves safe documents and recorded payments
+PASS Failed automation audit rolls back durable opt-in and invalidates the option cache
+PASS Demand automation requires an explicit boolean opt-in
+PASS Automation rejects truthy strings
+PASS Opting into automation does not queue an already-approved bill when approval is repeated
+PASS Real approval of a newly prepared bill queues its demand only after the approval transaction commits
+PASS Repeated real approval preserves one queued demand event
+PASS Explicit automation queues only the provided newly approved bill
+PASS Duplicate approval queue input schedules one demand event
+PASS Institution user cannot connect or issue accounting documents
+PASS Institution sees only its issued documents and never another institution or uncertain operations
+PASS Direct accounting wrapper also enforces manager-only mutation
+PASS Trusted opted-in cron worker can issue a verified demand without impersonating an administrator
+PASS Disabling automation prevents pending cron work from sending
+
+73 iCount assertions passed; all provider requests mocked.

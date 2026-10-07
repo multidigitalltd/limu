@@ -1,9 +1,9 @@
 {
   "name": "limu-crm",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "scripts": {
-    "build": "esbuild limu-crm/assets/crm.js --minify --outfile=limu-crm/assets/crm.min.js && esbuild limu-crm/assets/privacy.js --minify --outfile=limu-crm/assets/privacy.min.js && esbuild limu-crm/assets/crm.css --minify --outfile=limu-crm/assets/crm.min.css",
+    "build": "node scripts/build.mjs",
     "check:js": "node --check limu-crm/assets/crm.js && node --check limu-crm/assets/privacy.js",
     "test:browser": "node tests/browser.cjs"
   },

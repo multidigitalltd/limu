@@ -1,3 +1,46 @@
+PASS Bootstrap provides an empty legacy forms array without exposing or changing stored retired mappings
+PASS Older settings clients can save their exact flags while the empty forms compatibility field is never persisted
+PASS Settings reject nonempty, null, scalar, object or malformed legacy forms without modifying configuration: {"retired-form":[]}
+PASS Settings reject nonempty, null, scalar, object or malformed legacy forms without modifying configuration: null
+PASS Settings reject nonempty, null, scalar, object or malformed legacy forms without modifying configuration: ""
+PASS Settings reject nonempty, null, scalar, object or malformed legacy forms without modifying configuration: false
+PASS Settings reject nonempty, null, scalar, object or malformed legacy forms without modifying configuration: 0
+PASS Settings reject nonempty, null, scalar, object or malformed legacy forms without modifying configuration: {}
+PASS Settings reject nonempty, null, scalar, object or malformed legacy forms without modifying configuration: [["malformed"]]
+PASS The empty legacy forms field is rejected before handling the agreement mutation
+PASS The empty legacy forms field is rejected before handling the member mutation
+PASS The empty legacy forms field is rejected before handling the prepare mutation
+PASS The empty legacy forms field is rejected before handling the approve mutation
+PASS The empty legacy forms field is rejected before handling the payment mutation
+PASS The empty legacy forms field is rejected before handling the import mutation
+PASS The empty legacy forms field is rejected before handling the treatment mutation
+PASS The empty legacy forms field is rejected before handling the remap mutation
+PASS Legacy settings compatibility does not restore retired Elementor capture or validation hooks
+PASS The duplicate period is saved and resolved to its immutable delivery policy: calendar
+PASS The duplicate period is saved and resolved to its immutable delivery policy: rolling
+PASS The duplicate period is saved and resolved to its immutable delivery policy: days_30
+PASS The duplicate period is saved and resolved to its immutable delivery policy: days_90
+PASS The duplicate period is saved and resolved to its immutable delivery policy: days_180
+PASS The duplicate period is saved and resolved to its immutable delivery policy: months_24
+PASS The duplicate period is saved and resolved to its immutable delivery policy: custom
+PASS A custom duplicate period requires an explicitly supplied day count, even when a previous count exists
+PASS Invalid custom duplicate day counts cannot modify configuration: 0
+PASS Invalid custom duplicate day counts cannot modify configuration: 3651
+PASS Invalid custom duplicate day counts cannot modify configuration: -1
+PASS Invalid custom duplicate day counts cannot modify configuration: true
+PASS Invalid custom duplicate day counts cannot modify configuration: false
+PASS Invalid custom duplicate day counts cannot modify configuration: null
+PASS Invalid custom duplicate day counts cannot modify configuration: "1.5"
+PASS Invalid custom duplicate day counts cannot modify configuration: 30.5
+PASS Invalid custom duplicate day counts cannot modify configuration: "abc"
+PASS Invalid custom duplicate day counts cannot modify configuration: ""
+PASS Invalid custom duplicate day counts cannot modify configuration: []
+PASS Unknown duplicate period identifiers are rejected
+PASS Custom duplicate windows accept valid integer bounds and normalize decimal digit input: 1
+PASS Custom duplicate windows accept valid integer bounds and normalize decimal digit input: 3650
+PASS Custom duplicate windows accept valid integer bounds and normalize decimal digit input: 180
+PASS Selecting a preset without a day field preserves the manager's previous custom day count
+PASS A cached legacy settings form cannot silently reset an advanced duplicate period to its calendar default
 PASS Boolean values cannot become monetary amounts
 PASS Decimal money accepts exact decimal strings and integer units only
 PASS A forged per-institution VAT value cannot change the server-wide 18 percent rate
@@ -63,6 +106,7 @@ PASS Commit failure returns an error and rolls back the newly written record
 PASS Ordinary error rollback invalidates cached option changes
 PASS Nested transactions cannot bypass the mutation lock
 PASS Failed assignment transaction invalidates cached institution access
+PASS Institution bootstrap cannot read manager settings or the legacy compatibility payload
 PASS Institution role without assignments exposes no institution or contact data
 PASS All-period dashboard exposes no totals to an unassigned institution account
 PASS All-period dashboard rejects a forged institution filter
@@ -71,4 +115,4 @@ PASS Institution role cannot access audit records or mutate deliveries
 PASS Native WordPress private-record capabilities also deny institution users
 PASS Anonymous requests remain denied
 
-72 security regression assertions passed.
+116 security regression assertions passed.

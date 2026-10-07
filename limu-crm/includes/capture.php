@@ -19,7 +19,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * @return array|\WP_Error Updated delivery or an immutable-period conflict.
  */
 function reconcile_duplicates( $changed ) {
-	$start = ( new \DateTimeImmutable( $changed['date'], wp_timezone() ) )->modify( '-12 months' )->format( 'Y-m-d H:i:s' );
+	$start = ( new \DateTimeImmutable( $changed['date'], wp_timezone() ) )->modify( '-3650 days' )->format( 'Y-m-d H:i:s' );
 	$items = institution_deliveries( $changed['institution'], null, $start );
 	$bases = array();
 	$bills = array();

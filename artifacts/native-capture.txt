@@ -1,0 +1,29 @@
+PASS New stored shared lead is captured automatically for both exact institutions
+PASS Live native lead requires no manual confirmation
+PASS Shared deliveries reference the existing contact without copying its data
+PASS Private delivery payload does not copy the native contact fields
+PASS Retry reuses the stable native source delivery
+PASS Historical import source cannot duplicate or downgrade an already captured live lead
+PASS Draft source is not exposed as a live delivery
+PASS New draft published later in the same request is captured and its duplicate excluded
+PASS Newly observed backdated source stays historical and nonbillable
+PASS Editing an existing historical lead never turns it into a live billed lead
+PASS Unresolved new recipient remains a private mapping exception with its live origin
+PASS Unmapped native exception freezes the custom number of days
+PASS Invalid live contact remains a nonbillable private exception
+PASS Overlapping import can arrive before the queued live source is flushed
+PASS Only a source newly observed in this request is promoted after an import race, with duplicate re-evaluation
+PASS Import-race promotion freezes custom days before duplicate reconciliation
+PASS Delayed native remapping preserves its original custom policy after settings change
+PASS Automatic shared leads use independent tariffs and VAT while duplicates remain excluded
+PASS Monthly approval still operates separately from automatic lead capture
+PASS Late capture cannot change an already approved bill snapshot
+PASS Import-race promotion cannot change an already approved billing period
+PASS Existing AJAX observer ignores an untrusted outbound hostname
+PASS Failed AJAX HTTP transport is not counted as a lead
+PASS Accepted existing AJAX request captures the same contact separately for server-resolved CID recipients
+PASS AJAX observer reads the existing fName parameter correctly
+PASS Repeated HTTP observer callback is idempotent within the same request
+PASS Ambiguous CID mapping cannot disclose a contact to guessed institutions
+PASS Malformed public action selector is rejected safely
+OK 28 automatic native capture assertions

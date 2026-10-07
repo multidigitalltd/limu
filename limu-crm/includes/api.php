@@ -53,11 +53,16 @@ add_action(
 					'methods'             => 'POST',
 					'permission_callback' => __NAMESPACE__ . '\\permission',
 					'callback'            => function ( $request ) {
-						return locked(
+						$result = locked(
 							function () use ( $request ) {
 								return write_api( $request );
 							}
 						);
+						if ( ! is_wp_error( $result ) && isset( $result['newly_approved'] ) ) {
+							icount_queue_demands( $result['newly_approved'] );
+							unset( $result['newly_approved'] );
+						}
+						return $result;
 					},
 				)
 			);
@@ -91,7 +96,8 @@ function institution_list() {
 				'name' => get_the_title( $post->ID ),
 			);
 			if ( manager() ) {
-				$item['agreement'] = agreement( $post->ID );
+				$item['agreement']     = agreement( $post->ID );
+				$item['icount_client'] = icount_client( $post->ID );
 			}
 			return $item;
 		},
@@ -105,6 +111,16 @@ function institution_list() {
  * @return mixed Operation result or validation error.
  */
 function public_item( $item ) {
+	if ( isset( $item['id'] ) && in_array( get_post_type( $item['id'] ), array( 'lcrm_bill', 'lcrm_payment' ), true ) ) {
+		$item['documents'] = icount_documents( $item['id'] );
+		if ( ! manager() ) {
+			$item['documents'] = array_values( array_filter( $item['documents'], static fn( $document ) => 'issued' === $document['state'] ) );
+			foreach ( $item['documents'] as &$document ) {
+				unset( $document['key'], $document['target'] );
+			}
+			unset( $document );
+		}
+	}
 	unset( $item['phone_key'], $item['email_key'], $item['request_key'] );
 	if ( ! manager() ) {
 		$item['count'] = isset( $item['lines'] ) ? count( $item['lines'] ) : 0;
@@ -116,13 +132,49 @@ function public_item( $item ) {
 	return $item;
 }
 /**
+ * Validate one reporting period shared by lists, summaries and exports.
+ *
+ * @param \WP_REST_Request $request Authenticated REST request.
+ * @return array|\WP_Error Validated period filters or a safe validation error.
+ */
+function period_filters( $request ) {
+	$filters = array();
+	foreach ( array( 'month', 'year', 'date_from', 'date_to' ) as $key ) {
+		$value = $request->get_param( $key );
+		if ( null !== $value && '' !== $value ) {
+			if ( ! is_scalar( $value ) || is_bool( $value ) ) {
+				return error( 'תקופה לא תקינה.' );
+			}
+			$filters[ $key ] = (string) $value;
+		}
+	}
+	if ( isset( $filters['month'] ) && ! preg_match( '/^\d{4}-(0[1-9]|1[0-2])$/D', $filters['month'] ) ) {
+		return error( 'חודש לא תקין.' );
+	}
+	if ( isset( $filters['year'] ) && ( ! preg_match( '/^\d{4}$/D', $filters['year'] ) || (int) $filters['year'] < 1900 ) ) {
+		return error( 'שנה לא תקינה.' );
+	}
+	if ( isset( $filters['month'], $filters['year'] ) ) {
+		return error( 'יש לבחור חודש או שנה, ולא את שניהם יחד.' );
+	}
+	if ( isset( $filters['date_from'] ) || isset( $filters['date_to'] ) ) {
+		if ( ! isset( $filters['date_from'], $filters['date_to'] ) || ! preg_match( '/^\d{4}-\d{2}-\d{2}$/D', $filters['date_from'] ) || ! preg_match( '/^\d{4}-\d{2}-\d{2}$/D', $filters['date_to'] ) || ! valid_date( $filters['date_from'] ) || ! valid_date( $filters['date_to'] ) || $filters['date_from'] > $filters['date_to'] ) {
+			return error( 'יש לבחור תאריך התחלה וסיום תקינים, לפי הסדר.' );
+		}
+		if ( isset( $filters['month'] ) || isset( $filters['year'] ) ) {
+			return error( 'יש לבחור טווח תאריכים, חודש או שנה.' );
+		}
+	}
+	return $filters;
+}
+/**
  * Serve scoped reads and authorized exports.
  *
  * @param \WP_REST_Request $request Authenticated REST request.
  * @return mixed Operation result or validation error.
  */
 function read_api( $request ) {
-	foreach ( array( 'target', 'institution', 'month', 'year', 'state', 'page', 'search' ) as $key ) {
+	foreach ( array( 'target', 'institution', 'month', 'year', 'date_from', 'date_to', 'state', 'page', 'search' ) as $key ) {
 		$value = $request->get_param( $key );
 		if ( null !== $value && ! is_scalar( $value ) ) {
 			return error( 'פרמטר לא תקין.' );
@@ -132,6 +184,8 @@ function read_api( $request ) {
 			'institution' => 10,
 			'month'       => 7,
 			'year'        => 4,
+			'date_from'   => 10,
+			'date_to'     => 10,
 			'state'       => 30,
 			'page'        => 7,
 			'search'      => 200,
@@ -142,23 +196,21 @@ function read_api( $request ) {
 		if ( in_array( $key, array( 'institution', 'page' ), true ) && null !== $value && '' !== $value && ! preg_match( '/^\d+$/D', (string) $value ) ) {
 			return error( 'מזהה או עמוד לא תקין.' );
 		}
-		if ( 'month' === $key && null !== $value && '' !== $value && ! preg_match( '/^\d{4}-(0[1-9]|1[0-2])$/D', (string) $value ) ) {
-			return error( 'חודש לא תקין.' );
-		}
-		if ( 'year' === $key && null !== $value && '' !== $value && ( ! preg_match( '/^\d{4}$/D', (string) $value ) || (int) $value < 1900 ) ) {
-			return error( 'שנה לא תקינה.' );
-		}
 	}
-	if ( '' !== (string) ( $request->get_param( 'month' ) ?? '' ) && '' !== (string) ( $request->get_param( 'year' ) ?? '' ) ) {
-		return error( 'יש לבחור חודש או שנה, ולא את שניהם יחד.' );
+	$period = period_filters( $request );
+	if ( is_wp_error( $period ) ) {
+		return $period;
 	}
 	$route = basename( $request->get_route() );
 	if ( 'bootstrap' === $route ) {
+		// Older cached clients expect this field; never expose or restore retired form mappings.
+		$manager_settings = manager() ? array_merge( settings(), array( 'forms' => array() ) ) : null;
 		return array(
 			'manager'      => manager(),
 			'name'         => wp_get_current_user()->display_name,
 			'institutions' => institution_list(),
-			'settings'     => manager() ? settings() : null,
+			'settings'     => $manager_settings,
+			'icount'       => manager() ? icount_status() : null,
 			'today'        => current_time( 'Y-m-d' ),
 			'month'        => current_time( 'Y-m' ),
 		);
@@ -179,23 +231,21 @@ function read_api( $request ) {
 	if ( ! isset( $types[ $target ] ) || ( 'audit' === $target && ! manager() ) ) {
 		return error( 'דוח לא תקין.' );
 	}
-	$filters = array();
+	$filters = $period;
 	$id      = absint( $request->get_param( 'institution' ) );
 	if ( $id ) {
 		if ( ! owns( $id ) ) {
 			return error( 'אין הרשאה למוסד.', 403 );
 		} $filters['institution'] = $id;
 	}
-	foreach ( array( 'month', 'year', 'state' ) as $key ) {
-		$v = $request->get_param( $key );
-		if ( null !== $v && '' !== $v ) {
-			$filters[ $key ] = sanitize_text_field( $v );
-		}
+	$state = $request->get_param( 'state' );
+	if ( null !== $state && '' !== $state ) {
+		$filters['state'] = sanitize_text_field( $state );
 	}
 	$result = query_records( $types[ $target ], $filters, absint( $request->get_param( 'page' ) ), in_array( $route, array( 'export', 'report' ), true ) ? 5000 : 30, sanitize_text_field( $request->get_param( 'search' ) ?? '' ) );
 	if ( 'report' === $route ) {
 		if ( ! in_array( $target, array( 'deliveries', 'bills' ), true ) || $result['total'] > 5000 ) {
-			return error( 'יש לצמצם את הדוח לפי מוסד או חודש.' );
+			return error( 'יש לצמצם את הדוח לפי מוסד או תקופה.' );
 		} audit(
 			'export',
 			0,
@@ -208,7 +258,7 @@ function read_api( $request ) {
 	}
 	if ( 'export' === $route ) {
 		if ( $result['total'] > 5000 ) {
-			return error( 'הדוח גדול מדי. יש לסנן לפי מוסד או חודש.' );
+			return error( 'הדוח גדול מדי. יש לסנן לפי מוסד או תקופה.' );
 		} return export_xlsx( $target, $result );
 	}
 	$result['items'] = array_map(
@@ -229,12 +279,21 @@ function write_api( $request ) {
 	if ( strlen( $request->get_body() ) > 131072 ) {
 		return error( 'הבקשה גדולה מדי.', 413 );
 	}
-	$input = $request->get_json_params();
+	$input                  = $request->get_json_params();
+	$legacy_settings_client = is_array( $input ) && array_key_exists( 'forms', $input );
 	if ( ! is_array( $input ) ) {
 		return error( 'בקשה לא תקינה.' );
 	}
 	$route = basename( $request->get_route() );
 	foreach ( $input as $key => $value ) {
+		if ( 'forms' === $key ) {
+			// Accept only the empty JSON array sent by older settings clients; do not persist it.
+			$legacy_input = json_decode( $request->get_body() );
+			if ( 'settings' !== $route || array() !== $value || ! is_object( $legacy_input ) || ! isset( $legacy_input->forms ) || ! is_array( $legacy_input->forms ) ) {
+				return error( 'שדה לא תקין.' );
+			}
+			continue;
+		}
 		if ( is_string( $value ) && strlen( $value ) > 4096 ) {
 			return error( 'שדה ארוך מדי.' );
 		}
@@ -260,10 +319,20 @@ function write_api( $request ) {
 	if ( 'settings' === $route ) {
 		$mode  = $input['duplicate_mode'] ?? '';
 		$start = $input['start_date'] ?? '';
-		if ( ! in_array( $mode, array( 'calendar', 'rolling' ), true ) || ( '' !== $start && ! valid_date( $start ) ) ) {
+		if ( ! in_array( $mode, array( 'calendar', 'rolling', 'days_30', 'days_90', 'days_180', 'months_24', 'custom' ), true ) || ( '' !== $start && ! valid_date( $start ) ) ) {
 			return error( 'הגדרות לא תקינות.' );
 		}
 		$old = settings();
+		if ( ! empty( $legacy_settings_client ) && ! in_array( $old['duplicate_mode'], array( 'calendar', 'rolling' ), true ) && $mode !== $old['duplicate_mode'] ) {
+			return error( 'יש לרענן את העמוד לפני שמירת הגדרות הכפילות.', 409 );
+		}
+		if ( 'custom' === $mode && ! array_key_exists( 'duplicate_days', $input ) ) {
+			return error( 'יש לציין את מספר הימים למניעת כפילות.' );
+		}
+		$days = array_key_exists( 'duplicate_days', $input ) ? $input['duplicate_days'] : ( $old['duplicate_days'] ?? 30 );
+		if ( ( ! is_int( $days ) && ! is_string( $days ) ) || ! preg_match( '/^\d{1,4}$/D', (string) $days ) || (int) $days < 1 || (int) $days > 3650 ) {
+			return error( 'מספר הימים חייב להיות בין 1 ל־3650.' );
+		}
 		if ( '' !== $old['start_date'] && $old['start_date'] !== $start ) {
 			$q = query_records( 'lcrm_bill', array( 'state' => 'approved' ), 1, 1 );
 			if ( $q['total'] ) {
@@ -272,6 +341,7 @@ function write_api( $request ) {
 		}
 		$new = array(
 			'duplicate_mode' => $mode,
+			'duplicate_days' => (int) $days,
 			'automatic'      => ! empty( $input['automatic'] ),
 			'start_date'     => $start,
 		);
@@ -284,6 +354,7 @@ function write_api( $request ) {
 			0,
 			array(
 				'duplicate_mode' => $mode,
+				'duplicate_days' => (int) $days,
 				'automatic'      => $new['automatic'],
 			)
 		);
@@ -427,19 +498,27 @@ function write_api( $request ) {
 		if ( ! $ids ) {
 			return error( 'יש לבחור חיובים.' );
 		}
-		$result = array();
+		$result         = array();
+		$newly_approved = array();
 		foreach ( $ids as $id ) {
-			$r        = attempt(
+			$was_approved = 'lcrm_bill' === get_post_type( $id ) && 'approved' === ( data( $id )['state'] ?? '' );
+			$r            = attempt(
 				function () use ( $id ) {
 					return approve_bill( $id );
 				}
 			);
+			if ( ! is_wp_error( $r ) && ! $was_approved ) {
+				$newly_approved[] = $id;
+			}
 			$result[] = is_wp_error( $r ) ? array(
 				'id'    => $id,
 				'error' => $r->get_error_message(),
 			) : $r;
 		}
-		return array( 'results' => $result );
+		return array(
+			'results'        => $result,
+			'newly_approved' => $newly_approved,
+		);
 	}
 	if ( 'payment' === $route ) {
 		return record_payment( absint( $input['bill'] ?? 0 ), $input );
@@ -479,7 +558,7 @@ function write_api( $request ) {
 		}
 		$results = array();
 		foreach ( $destinations as $institution ) {
-			$result = record_delivery( $item, $institution, $item['source'], empty( $item['origin_live'] ) );
+			$result = record_delivery( $item, $institution, $item['source'], empty( $item['origin_live'] ), $item['duplicate_mode'] ?? null );
 			if ( is_wp_error( $result ) ) {
 				return $result;
 
@@ -510,7 +589,7 @@ function export_xlsx( $target, $result ) {
 	if ( ! in_array( $target, array( 'deliveries', 'bills' ), true ) ) {
 		return error( 'הייצוא זמין ללידים ולחיובים.' );
 	}
-	$headers      = 'deliveries' === $target ? array( 'מוסד', 'תאריך', 'שם', 'טלפון', 'אימייל', 'מקור', 'כפילות', 'מצב מסירה' ) : array( 'מוסד', 'חודש', 'מצב', 'לפני מעמ', 'מעמ', 'סך הכל', 'שולם', 'יתרה', 'מועד פירעון' );
+	$headers      = 'deliveries' === $target ? array( 'מוסד', 'תאריך', 'שם', 'טלפון', 'אימייל', 'מקור', 'כפילות', 'מצב מסירה' ) : array( 'מוסד', 'חודש שירות מלא', 'מצב', 'לפני מעמ', 'מעמ', 'סך הכל', 'שולם', 'יתרה', 'מועד פירעון' );
 	$institutions = array_column( institution_list(), 'name', 'id' );
 	$rows         = array( $headers );
 	foreach ( $result['items'] as $item ) {
@@ -566,20 +645,9 @@ function export_xlsx( $target, $result ) {
  * @return mixed Operation result or validation error.
  */
 function summary( $request ) {
-	$month = sanitize_text_field( $request->get_param( 'month' ) ?? '' );
-	$year  = sanitize_text_field( $request->get_param( 'year' ) ?? '' );
-	if ( '' !== $month && ! preg_match( '/^\d{4}-(0[1-9]|1[0-2])$/D', $month ) ) {
-		return error( 'חודש לא תקין.' );
-	}
-	if ( '' !== $year && ( ! preg_match( '/^\d{4}$/D', $year ) || (int) $year < 1900 ) ) {
-		return error( 'שנה לא תקינה.' );
-	}
-	if ( '' !== $month && '' !== $year ) {
-		return error( 'יש לבחור חודש או שנה, ולא את שניהם יחד.' );
-	}
-	$filters = '' === $month ? array() : array( 'month' => $month );
-	if ( '' !== $year ) {
-		$filters['year'] = $year;
+	$filters = period_filters( $request );
+	if ( is_wp_error( $filters ) ) {
+		return $filters;
 	}
 	$iid = absint( $request->get_param( 'institution' ) );
 	if ( $iid ) {

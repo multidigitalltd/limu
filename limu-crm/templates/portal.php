@@ -84,7 +84,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	<div class="sidebar-bottom"><span class="avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 21v-2a7 7 0 0 0-14 0v2 M17 7a4 4 0 1 1-8 0a4 4 0 0 1 8 0z"></path></svg></span><div class="user-identity"><strong><?php echo esc_html( wp_get_current_user()->display_name ); ?></strong><small><?php echo manager() ? 'מנהל מערכת' : 'נציג מוסד · צפייה בלבד'; ?></small></div><a class="logout-link" href="<?php echo esc_url( wp_logout_url( home_url( '/crm/' ) ) ); ?>"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5H5v14h4 M14 8l4 4-4 4 M9 12h9"></path></svg><span>יציאה</span></a></div>
 </aside>
 <div class="workspace">
-	<header class="topbar"><span class="breadcrumb"><span class="breadcrumb-root" dir="ltr">Limu CRM</span><span class="breadcrumb-separator" aria-hidden="true">/</span><strong id="breadcrumb">סקירה כללית</strong></span><span class="private-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 10h12v11H6z M8 10V6a4 4 0 0 1 8 0v4 M12 14v3"></path></svg>מרחב ניהול מאובטח</span></header>
+	<header class="topbar"><span class="breadcrumb"><span class="breadcrumb-root" dir="ltr">Limu CRM</span><span class="breadcrumb-separator" aria-hidden="true">/</span><strong id="breadcrumb">סקירה כללית</strong></span></header>
 	<main id="main" tabindex="-1"><div id="notification" role="status" aria-live="polite"></div><div id="screen" aria-busy="true"><p class="loading">טוען את סביבת העבודה…</p></div></main>
 </div></div>
 <dialog id="modal" aria-labelledby="modal-title"><button id="close-modal" type="button" class="icon-button" aria-label="סגירת חלון"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12 M18 6L6 18"></path></svg></button><div id="modal-content"></div></dialog>

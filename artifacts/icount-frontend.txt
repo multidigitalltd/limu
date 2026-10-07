@@ -1,0 +1,30 @@
+PASS Connection status escapes provider company data and exposes no API secret input
+PASS Connection verification is an explicit empty-payload action
+PASS Automatic demands require an explicit setting and persist after refresh
+PASS An institution without a verified fiscal client has no document issuance actions
+PASS Client preview verifies and escapes provider identity before any institution mapping is saved
+PASS Institution mapping requires explicit confirmation of the verified client and sends only both IDs
+PASS An unapproved monthly bill offers no fiscal issuance actions
+PASS Opening an approved bill loads current fiscal records using only its bill ID
+PASS Fiscal confirmation shows fixed VAT and has no editable amount, price, or client fields
+PASS Demand issuance sends only the immutable bill ID and document type
+PASS An issued demand cannot be issued again and still permits its invoice
+PASS Invoice issuance sends no browser-provided financial amounts or client metadata
+PASS An uncertain document blocks demand, invoice, and payment issuance and offers reconciliation
+PASS Reconciliation offers no manual document number or fabricated provider ID
+PASS Reconciliation sends only the original target and document type
+PASS An uncertain issuance error is escaped and disables a repeated confirmation
+PASS Reopening after an uncertain failure refreshes its state and keeps issuance blocked
+PASS A single full cash payment offers a tax invoice and receipt without editable payment amounts
+PASS Full cash fiscal issuance sends only the recorded payment ID
+PASS An issued invoice and receipt prevents another invoice or payment document
+PASS A partial payment requires the full bill invoice before its receipt
+PASS A recorded partial payment with an invoice offers a receipt
+PASS Receipt issuance derives its type and amount from the recorded payment
+PASS Transfer issuance requires a verified bank account and escapes its provider label
+PASS Transfer issuance sends only its recorded payment ID and selected provider bank account
+PASS Missing verified bank accounts prevent fiscal transfer submission
+PASS Document labels are escaped and only trusted HTTPS provider URLs receive safe external links
+PASS A real institution login only views its issued document link and sends no fiscal actions
+PASS Fiscal UI has no JavaScript errors and sends no requests outside the local intercepted fixtures
+29 nonmutating iCount frontend checks passed.

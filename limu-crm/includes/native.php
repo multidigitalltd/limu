@@ -134,7 +134,7 @@ function native_capture( $id ) {
 		$lead['state']          = 'unmapped';
 		$lead['month']          = substr( $post->post_date, 0, 7 );
 		$lead['duplicate_of']   = 0;
-		$lead['duplicate_mode'] = settings()['duplicate_mode'];
+		$lead['duplicate_mode'] = duplicate_policy( settings() );
 		$lead['bill']           = 0;
 		$lead['treatment']      = 'new';
 		$lead['notes']          = array();
@@ -161,7 +161,7 @@ function native_capture( $id ) {
 			$result['origin_live']    = true;
 			$result['capture_via']    = 'native';
 			$result['duplicate_of']   = 0;
-			$result['duplicate_mode'] = settings()['duplicate_mode'];
+			$result['duplicate_mode'] = duplicate_policy( settings() );
 			$result                   = save_record( 'lcrm_delivery', $result, $result['id'] );
 			if ( is_wp_error( $result ) ) {
 				return $result;

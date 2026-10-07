@@ -1,11 +1,11 @@
-=== Limu CRM — Multi Digital ===
+=== crm ===
 Contributors: multidigital
 Requires at least: 6.6
 Requires PHP: 7.4.33
-Stable tag: 0.1.2
+Stable tag: 0.1.3
 License: GPLv2 or later
 
-Hebrew private CRM portal for institution leads and monthly internal billing.
+crm
 
 == Installation ==
 Install on staging first. Activate and open /crm/ with an administrator account.
@@ -14,6 +14,6 @@ Configure institution rates, billing start date and members. Existing site leads
 Exclude /crm/ and /wp-json/limu-crm/v1/* from public page caching.
 
 == Important ==
-iCount integration is reserved for the final phase. No invoices or external emails are sent.
+iCount supports verified client mapping, demands, invoices and payment receipts. Configure server-only LIMU_CRM_ICOUNT_TOKEN and verify the connection before issuance. Emails/SMS are disabled.
 Lead capture is automatic from existing site records/dispatch; no per-lead approval. Historical import never bills.
 Full installation, security, adapter and testing notes are in the repository README.md.
