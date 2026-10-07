@@ -2,7 +2,7 @@
 /**
  * Plugin Name: crm
  * Description: crm
- * Version: 0.1.3
+ * Version: 0.1.4
  * Requires at least: 6.6
  * Requires PHP: 7.4.33
  * License: GPL-2.0-or-later
@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 define( 'LIMU_CRM_FILE', __FILE__ );
-define( 'LIMU_CRM_VERSION', '0.1.3' );
+define( 'LIMU_CRM_VERSION', '0.1.4' );
 require_once __DIR__ . '/includes/assets.php';
 require_once __DIR__ . '/includes/domain.php';
 require_once __DIR__ . '/includes/store.php';
