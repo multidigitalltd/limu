@@ -1,6 +1,6 @@
 {
   "name": "limu-crm",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "scripts": {
     "build": "esbuild limu-crm/assets/crm.js --minify --outfile=limu-crm/assets/crm.min.js && esbuild limu-crm/assets/access.js --minify --outfile=limu-crm/assets/access.min.js && esbuild limu-crm/assets/crm.css --minify --outfile=limu-crm/assets/crm.min.css",

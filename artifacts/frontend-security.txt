@@ -1,0 +1,16 @@
+PASS Dashboard counters and institution names escape hostile HTML
+PASS Mobile portal retains a usable logout control
+PASS Incomplete legacy capture has no manual lead approval action
+PASS Lead fields, duplicate references and internal notes escape hostile HTML
+PASS Lead PDF snapshot includes all matching records and escapes hostile contact data
+PASS Billing counters and line references escape hostile HTML
+PASS Audit event, actor and target escape hostile HTML
+PASS Print snapshot escapes hostile institution names and data
+PASS Current and scheduled future tariffs are shown separately
+PASS Tariff edit defaults to the rate effective today
+PASS A future-only tariff does not prefill an active rate
+PASS Successful save followed by refresh failure is reported as committed
+PASS Completion of an older save does not close a newer dialog
+PASS Expired authentication explains recovery instead of retrying a stale nonce
+PASS Malformed saved display preferences recover without disabling accessibility controls
+15 nonmutating frontend regression checks passed.

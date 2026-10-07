@@ -18,9 +18,9 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 function normalize_phone( $value ) {
 	$digits = preg_replace( '/\D+/', '', (string) $value );
-	if ( str_starts_with( $digits, '00972' ) ) {
+	if ( 0 === strpos( $digits, '00972' ) ) {
 		$digits = '0' . substr( $digits, 5 );
-	} elseif ( str_starts_with( $digits, '972' ) ) {
+	} elseif ( 0 === strpos( $digits, '972' ) ) {
 		$digits = '0' . substr( $digits, 3 );
 	}
 		return strlen( $digits ) >= 7 && strlen( $digits ) <= 15 ? $digits : '';
@@ -42,7 +42,7 @@ function normalize_email( $value ) {
  * @return mixed Operation result or validation error.
  */
 function money( $value ) {
-	if ( ! is_scalar( $value ) || ! preg_match( '/^\d{1,8}(?:\.\d{1,2})?$/D', (string) $value ) ) {
+	if ( ( ! is_string( $value ) && ! is_int( $value ) ) || ! preg_match( '/^\d{1,8}(?:\.\d{1,2})?$/D', (string) $value ) ) {
 		return null;
 	}
 	$parts = explode( '.', (string) $value );

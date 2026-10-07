@@ -116,25 +116,31 @@ function data( $id ) {
  */
 function locked( $callback ) {
 	global $wpdb;
+	if ( isset( $GLOBALS['lcrm_changed_records'] ) ) {
+		return error( 'לא ניתן להתחיל פעולה מקבילה בתוך פעולה קיימת.', 409 );
+	}
 	$name = 'lcrm_' . md5( DB_NAME . ':' . $wpdb->prefix );
 	if ( '1' !== (string) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, %d)', $name, 5 ) ) ) {
 		return error( 'המערכת עסוקה. נסו שוב בעוד רגע.', 409 );
 	}
-	$wpdb->query( 'START TRANSACTION' );
-	$GLOBALS['lcrm_changed_records'] = array();
-	$GLOBALS['lcrm_changed_users']   = array();
 	try {
-		$result = $callback();
+		$tables = $wpdb->get_results( $wpdb->prepare( 'SELECT TABLE_NAME, ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = %s AND TABLE_NAME IN (%s, %s, %s, %s)', DB_NAME, $wpdb->posts, $wpdb->postmeta, $wpdb->options, $wpdb->usermeta ), ARRAY_A );
+		if ( 4 !== count( $tables ) || array_filter( $tables, static fn( $table ) => 'INNODB' !== strtoupper( $table['ENGINE'] ) ) ) {
+			return error( 'שמירה מאובטחת דורשת טבלאות InnoDB. יש לפנות למנהל האתר.', 503 );
+		}
+		if ( false === $wpdb->query( 'START TRANSACTION' ) ) {
+			return error( 'לא ניתן להתחיל שמירה. יש לנסות שוב.', 503 );
+		}
+		$GLOBALS['lcrm_changed_records'] = array();
+		$GLOBALS['lcrm_changed_users']   = array();
+		$result                          = $callback();
 		if ( is_wp_error( $result ) ) {
 			$wpdb->query( 'ROLLBACK' );
-		} else {
-			$wpdb->query( 'COMMIT' );
-		}
-		if ( is_wp_error( $result ) ) {
-			foreach ( $GLOBALS['lcrm_changed_records'] as $id ) {
-					clean_post_cache( $id );
-					wp_cache_delete( $id, 'post_meta' );
-			}
+			rollback_caches();
+		} elseif ( false === $wpdb->query( 'COMMIT' ) ) {
+			$wpdb->query( 'ROLLBACK' );
+			rollback_caches();
+			$result = error( 'הפעולה לא נשמרה. יש לנסות שוב.', 500 );
 		}
 		return $result;
 	} catch ( \Throwable $exception ) {
@@ -167,7 +173,7 @@ function save_record( $type, $payload, $id = 0 ) {
 	if ( 'lcrm_delivery' === $type && ! empty( $payload['contact'] ) ) {
 		unset( $payload['name'], $payload['phone'], $payload['email'] );
 	}
-	$saved = wp_insert_post( $post, true );
+	$saved = wp_insert_post( wp_slash( $post ), true );
 	if ( is_wp_error( $saved ) ) {
 		return error( 'שמירת הנתונים נכשלה.', 500 );
 	}
@@ -175,10 +181,10 @@ function save_record( $type, $payload, $id = 0 ) {
 		$GLOBALS['lcrm_changed_records'][] = $saved;
 	}
 	$payload['id'] = $saved;
-	update_post_meta( $saved, '_lcrm_data', $payload );
+	update_post_meta( $saved, '_lcrm_data', wp_slash( $payload ) );
 	foreach ( array( 'institution', 'month', 'state', 'source', 'date', 'bill' ) as $key ) {
 		if ( isset( $payload[ $key ] ) ) {
-			update_post_meta( $saved, '_lcrm_' . $key, $payload[ $key ] );
+			update_post_meta( $saved, '_lcrm_' . $key, wp_slash( $payload[ $key ] ) );
 			if ( (string) get_post_meta( $saved, '_lcrm_' . $key, true ) !== (string) $payload[ $key ] ) {
 				return error( 'שמירת אינדקס הרשומה נכשלה.', 500 );
 			}
@@ -334,7 +340,7 @@ function institution_deliveries( $id, $before = null, $after = null ) {
 	return $items;
 }
 /**
- * New deliveries require a server-confirmed institution and explicit delivery evidence.
+ * Record automatic source events against validated institutions.
  *
  * @param array  $lead Validated contact and delivery context.
  * @param int    $institution Server-validated recipient institution.
@@ -343,10 +349,20 @@ function institution_deliveries( $id, $before = null, $after = null ) {
  * @return mixed Operation result or validation error.
  */
 function record_delivery( $lead, $institution, $source, $historical = false ) {
+	if ( ! is_array( $lead ) || ! is_string( $source ) || '' === $source || strlen( $source ) > 180 || ! isset( $lead['date'] ) || ! is_string( $lead['date'] ) || ! valid_date( substr( $lead['date'], 0, 10 ) ) || ! preg_match( '/^\d{4}-\d{2}-\d{2} (?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/D', $lead['date'] ) ) {
+		return error( 'פרטי מקור או מועד פנייה לא תקינים.' );
+	}
+	foreach ( array( 'name', 'phone', 'email', 'form' ) as $field ) {
+		if ( isset( $lead[ $field ] ) && ( ! is_string( $lead[ $field ] ) || strlen( $lead[ $field ] ) > 600 ) ) {
+			return error( 'פרטי פנייה לא תקינים.' );
+		}
+	}
 	if ( 'institutions' !== get_post_type( $institution ) ) {
 		return error( 'מוסד לא תקין.' );
 	}
-	$existing = get_posts(
+	$lead['phone_key'] = normalize_phone( $lead['phone'] ?? '' );
+	$lead['email_key'] = normalize_email( $lead['email'] ?? '' );
+	$existing          = get_posts(
 		array(
 			'post_type'      => 'lcrm_delivery',
 			'post_status'    => 'private',
@@ -366,10 +382,18 @@ function record_delivery( $lead, $institution, $source, $historical = false ) {
 		)
 	);
 	if ( $existing ) {
-		return data( $existing[0] );
+		$item = data( $existing[0] );
+		if ( ! $historical && ( $item['phone_key'] !== $lead['phone_key'] || $item['email_key'] !== $lead['email_key'] ) ) {
+			return error( 'מזהה המסירה כבר קיים עם פרטי קשר אחרים.', 409 );
+		}
+		return $item;
 	}
-	$lead['phone_key'] = normalize_phone( $lead['phone'] ?? '' );
-	$lead['email_key'] = normalize_email( $lead['email'] ?? '' );
+	if ( ! $historical ) {
+		$existing_bill = bill_for( $institution, substr( $lead['date'], 0, 7 ) );
+		if ( $existing_bill && 'approved' === $existing_bill['state'] ) {
+			return error( 'התקופה כבר אושרה. נדרשת התאמה כספית נפרדת.', 409 );
+		}
+	}
 	if ( ! $lead['phone_key'] && ! $lead['email_key'] && ! $historical ) {
 		return error( 'נדרש טלפון או אימייל תקין.' );
 	}
@@ -389,7 +413,13 @@ function record_delivery( $lead, $institution, $source, $historical = false ) {
 			)
 		);
 		if ( $contacts ) {
-			$contact_id = $contacts[0];
+			$contact_id           = $contacts[0];
+			$contact              = data( $contact_id );
+			$contact['phone_key'] = normalize_phone( $contact['phone'] );
+			$contact['email_key'] = normalize_email( $contact['email'] );
+			if ( ! $historical && ( $lead['phone_key'] !== $contact['phone_key'] || $lead['email_key'] !== $contact['email_key'] ) ) {
+				return error( 'מזהה הפנייה כבר קיים עם פרטי קשר אחרים.', 409 );
+			}
 		} else {
 				$contact = save_record(
 					'lcrm_contact',
@@ -419,7 +449,7 @@ function record_delivery( $lead, $institution, $source, $historical = false ) {
 			break;
 		}
 	}
-	$item = array_merge(
+	$item   = array_merge(
 		$lead,
 		array(
 			'treatment'      => 'new',
@@ -433,7 +463,8 @@ function record_delivery( $lead, $institution, $source, $historical = false ) {
 			'bill'           => 0,
 		)
 	);
-	return save_record( 'lcrm_delivery', $item );
+	$result = save_record( 'lcrm_delivery', $item );
+	return is_wp_error( $result ) || $historical ? $result : reconcile_duplicates( $result );
 }
 /**
  * Find the unique institution and service-month bill.
@@ -611,6 +642,11 @@ function record_payment( $bill_id, $input ) {
 	if ( ! is_string( $key ) || ! preg_match( '/^[a-zA-Z0-9-]{16,64}$/D', $key ) || ! valid_date( $date ) || $date > current_time( 'Y-m-d' ) || null === $amount || $amount <= 0 ) {
 		return error( 'פרטי תשלום לא תקינים.' );
 	}
+	$method    = sanitize_key( $input['method'] ?? '' );
+	$reference = sanitize_text_field( substr( (string) ( $input['reference'] ?? '' ), 0, 200 ) );
+	if ( ! in_array( $method, array( 'transfer', 'card', 'check', 'cash', 'other' ), true ) ) {
+		return error( 'יש לבחור אמצעי תשלום.' );
+	}
 	$payments = get_posts(
 		array(
 			'post_type'      => 'lcrm_payment',
@@ -625,15 +661,14 @@ function record_payment( $bill_id, $input ) {
 	foreach ( $payments as $pid ) {
 		$p = data( $pid );
 		if ( $p['request_key'] === $key ) {
+			if ( $p['amount'] !== $amount || $p['date'] !== $date || $p['method'] !== $method || $p['reference'] !== $reference ) {
+				return error( 'הניסיון הקודם כבר נשמר עם פרטי תשלום אחרים. יש לרענן ולבדוק את היתרה.', 409 );
+			}
 			return $p;
 		} $paid += $p['amount'];
 	}
 	if ( $paid + $amount > $bill['total'] ) {
 		return error( 'התשלום גבוה מהיתרה.', 409 );
-	}
-	$method = sanitize_key( $input['method'] ?? '' );
-	if ( ! in_array( $method, array( 'transfer', 'card', 'check', 'cash', 'other' ), true ) ) {
-		return error( 'יש לבחור אמצעי תשלום.' );
 	}
 	$payment = save_record(
 		'lcrm_payment',
@@ -643,7 +678,7 @@ function record_payment( $bill_id, $input ) {
 			'amount'         => $amount,
 			'date'           => $date,
 			'method'         => $method,
-			'reference'      => sanitize_text_field( substr( (string) ( $input['reference'] ?? '' ), 0, 200 ) ),
+			'reference'      => $reference,
 			'request_key'    => $key,
 			'actor'          => get_current_user_id(),
 			'state'          => 'recorded',
@@ -666,19 +701,23 @@ function record_payment( $bill_id, $input ) {
  *
  * @param callable $callback Mutation executed under lock or savepoint.
  * @return mixed Operation result or validation error.
+ * @throws \RuntimeException When a savepoint operation fails; the enclosing transaction rolls back.
  */
 function attempt( $callback ) {
 	global $wpdb;
-	$wpdb->query( 'SAVEPOINT lcrm_item' );
+	if ( false === $wpdb->query( 'SAVEPOINT lcrm_item' ) ) {
+		throw new \RuntimeException( 'Savepoint failed.' );
+	}
 	$result = $callback();
 	if ( is_wp_error( $result ) ) {
-		$wpdb->query( 'ROLLBACK TO SAVEPOINT lcrm_item' );
-		foreach ( $GLOBALS['lcrm_changed_records'] ?? array() as $id ) {
-			clean_post_cache( $id );
-			wp_cache_delete( $id, 'post_meta' );
+		if ( false === $wpdb->query( 'ROLLBACK TO SAVEPOINT lcrm_item' ) ) {
+			throw new \RuntimeException( 'Savepoint rollback failed.' );
 		}
+		rollback_caches();
 	}
-	$wpdb->query( 'RELEASE SAVEPOINT lcrm_item' );
+	if ( false === $wpdb->query( 'RELEASE SAVEPOINT lcrm_item' ) ) {
+		throw new \RuntimeException( 'Savepoint release failed.' );
+	}
 	return $result;
 }
 

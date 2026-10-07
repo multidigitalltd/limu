@@ -1,1 +1,1 @@
-ece58977e517bd15120dd4113bb73f0e0cb90a3d15cab1e201b15e032a84f0ba  limu-crm-0.1.0.zip
+2062c958d21fbbfa2f70664efd7c04a83d9da41aa2be839ff7c4be8001ef7e42  downloads/limu-crm-0.1.1.zip

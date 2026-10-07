@@ -1,0 +1,57 @@
+PASS Boolean values cannot become monetary amounts
+PASS Decimal money accepts exact decimal strings and integer units only
+PASS Contact values and searchable titles preserve literal backslashes
+PASS Internal notes preserve literal backslashes without failed verification
+PASS Source key cannot silently change contact data for the same institution
+PASS Shared source key cannot mix different contacts across institutions
+PASS Newer automatic delivery can arrive first
+PASS Earlier automatic delivery can arrive later without manager intervention
+PASS Automatic arrival order cannot make both matching deliveries billable
+PASS Reconciled chronology bills the matching contact once
+PASS Separate frozen-billing fixture arrives automatically
+PASS Separate security bill approved
+PASS Earlier-month automatic delivery cannot change a later approved billing period
+PASS Rejected automatic arrival leaves no partial record and preserves the approved snapshot
+PASS Trusted delivery cannot silently disappear from an already approved month
+PASS Isolated idempotent payment recorded
+PASS Exact payment replay returns the existing payment
+PASS Changed payment payload cannot reuse an already committed request key
+PASS Rolling chain can arrive automatically before its older anchor
+PASS Rolling tail initially duplicates the first automatic anchor
+PASS Earlier rolling anchor can arrive automatically when future periods remain editable
+PASS Rolling reconciliation updates the full chain and expires at the older anniversary
+PASS Approved month can contain an excluded duplicate with no bill attachment
+PASS Late automatic anchor cannot make an excluded duplicate billable in an approved later month
+PASS Failed rolling reconciliation rolls back all earlier chain edits and preserves the snapshot
+PASS Mapped import persistence failure stops the batch
+PASS Failed historical batch leaves no partial delivery record
+PASS Historical batch retries safely from its unchanged cursor
+PASS Retried historical record remains nonbillable
+PASS Unmapped import persistence failure stops the batch
+PASS Failed historical batch leaves no partial delivery record
+PASS Historical batch retries safely from its unchanged cursor
+PASS Retried historical record remains nonbillable
+PASS Array query input rejected for institution
+PASS Array query input rejected for month
+PASS Array query input rejected for state
+PASS Array query input rejected for page
+PASS Array query input rejected for search
+PASS Oversized search is rejected before database work
+PASS Oversized mutation input is rejected before persistence
+PASS Manager mutation without a REST nonce is rejected
+PASS Manual per-lead confirmation route is unavailable even to administrators
+PASS Oversized prepare batch is rejected before deduplication or truncation
+PASS Oversized approve batch is rejected before deduplication or truncation
+PASS Nontransactional engine report fails closed before running the mutation
+PASS Transaction-start failure fails closed before running the mutation
+PASS Commit failure returns an error and rolls back the newly written record
+PASS Ordinary error rollback invalidates cached option changes
+PASS Nested transactions cannot bypass the mutation lock
+PASS Failed assignment transaction invalidates cached institution access
+PASS Institution role without assignments exposes no institution or contact data
+PASS Blank institution assignment cannot request another institution directly
+PASS Institution role cannot access audit records or mutate deliveries
+PASS Native WordPress private-record capabilities also deny institution users
+PASS Anonymous requests remain denied
+
+55 security regression assertions passed.

@@ -64,9 +64,9 @@ try {
  check( 403 === request( 'audit' )->get_status(), 'Institution cannot access audit log' );
  check( ! isset( $r['items'][0]['phone_key'] ) && ! isset( $r['items'][0]['notes'] ), 'Institution response omits internal fields' );
  wp_set_current_user( $admin->ID ); check( 403 === request( 'settings', array( 'duplicate_mode' => 'calendar' ), false )->get_status(), 'Missing mutation nonce rejected' );
- $export = request( 'export' )->get_data(); check( isset( $export['file'] ) && str_starts_with( base64_decode( $export['file'] ), 'PK' ), 'Real XLSX archive exported' );
+ $export = request( 'export' )->get_data(); check( isset( $export['file'] ) && 0 === strpos( base64_decode( $export['file'] ), 'PK' ), 'Real XLSX archive exported' );
  $path = tempnam( sys_get_temp_dir(), 'lcrm' ); file_put_contents( $path, base64_decode( $export['file'] ) ); $zip = new ZipArchive(); $zip->open( $path );
- $sheet = $zip->getFromName( 'xl/worksheets/sheet1.xml' ); check( str_contains( $sheet, 'inlineStr' ) && ! str_contains( $sheet, '<f>' ), 'Spreadsheet cells do not execute formulas' ); $zip->close(); unlink( $path );
+ $sheet = $zip->getFromName( 'xl/worksheets/sheet1.xml' ); check( false !== strpos( $sheet, 'inlineStr' ) && false === strpos( $sheet, '<f>' ), 'Spreadsheet cells do not execute formulas' ); $zip->close(); unlink( $path );
 
  $count_before = LimuCRM\query_records( 'lcrm_delivery' )['total'];
  LimuCRM\locked( function () use ( $a, $month ) { LimuCRM\record_delivery( array( 'name' => 'rollback', 'phone' => '0535555555', 'email' => '', 'date' => $month . '-10 12:00:00', 'form' => 'test' ), $a, 'test:rollback' ); return LimuCRM\error( 'test rollback' ); } );
@@ -76,13 +76,14 @@ try {
   public function get_form_settings( $key ) { return 'id' === $key ? 'form-test' : 'טופס בדיקה'; }
   public function get( $key ) { return array( 'contact-name' => array( 'value' => 'פונה חדש' ), 'contact-phone' => array( 'value' => '0532222222' ), 'contact-email' => array( 'value' => 'capture@example.test' ), 'institution' => array( 'value' => '999999' ) ); }
  };
- do_action( 'elementor_pro/forms/new_record', $record, null );
- $pending = LimuCRM\query_records( 'lcrm_delivery', array( 'state' => 'pending' ) )['items'];
- check( 1 === count( $pending ) && $a === $pending[0]['institution'], 'Elementor capture uses configured recipients, not forged hidden recipient' );
+ LimuCRM\native_flush(); unset( $GLOBALS['lcrm_native_new_leads'], $GLOBALS['lcrm_native_queue'], $GLOBALS['lcrm_native_published_leads'] );
+ do_action( 'elementor_pro/forms/new_record', $record, null ); LimuCRM\flush_elementor_capture();
+ $captured = LimuCRM\query_records( 'lcrm_delivery', array( 'state' => 'sent', 'month' => current_time( 'Y-m' ) ) )['items'];
+ check( 1 === count( $captured ) && $a === $captured[0]['institution'], 'Elementor automatic capture uses configured recipients, not forged hidden recipient' );
  wp_set_current_user( $uid ); $visible = request( 'deliveries' )->get_data()['items'];
- check( ! array_filter( $visible, fn( $d ) => 'pending' === $d['state'] ), 'Unconfirmed potential recipients do not see captured contact details' );
+ check( count( array_filter( $visible, fn( $d ) => $captured[0]['id'] === $d['id'] ) ) === 1, 'Automatically captured lead is visible to its institution without manual approval' );
  wp_set_current_user( $admin->ID );
- check( 200 === request( 'confirm', array( 'id' => $pending[0]['id'], 'evidence' => 'verified test handoff' ) )->get_status(), 'Manager can confirm actual delivery' );
+ check( 404 === request( 'confirm', array( 'id' => $captured[0]['id'] ) )->get_status(), 'Manual lead-confirmation endpoint is absent' );
  check( 200 === request( 'treatment', array( 'id' => $first['id'], 'treatment' => 'working', 'note' => 'Internal note <script>bad</script>' ) )->get_status(), 'Manager can update treatment and internal notes' );
  wp_set_current_user( $uid ); $visible = request( 'deliveries' )->get_data()['items'];
  check( ! array_filter( $visible, fn( $d ) => isset( $d['notes'] ) ), 'Internal notes never appear in institution payloads' );

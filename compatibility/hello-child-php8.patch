@@ -1,0 +1,5 @@
+--- a/functions.php
++++ b/functions.php
+@@ -370 +370 @@
+-add_action('template_redirect', computec_template_redirect);
++add_action('template_redirect', 'computec_template_redirect');

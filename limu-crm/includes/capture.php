@@ -1,6 +1,6 @@
 <?php
 /**
- * Elementor submission staging and historical import adapters.
+ * Automatic form capture and historical import adapters.
  *
  * @package LimuCRM
  */
@@ -12,26 +12,48 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 /**
- * Re-evaluate against confirmed deliveries only, on manager-confirmed delivery.
+ * Reconcile subsequent deliveries when source events arrive out of chronological order.
+ * Existing per-delivery policies remain intact and approved periods are never changed.
  *
- * @param array $item Private record payload.
- * @return mixed Operation result or validation error.
+ * @param array $changed Newly recorded automatic delivery.
+ * @return array|\WP_Error Updated delivery or an immutable-period conflict.
  */
-function recalculate_duplicate( $item ) {
-	$s                      = settings();
-	$item['duplicate_of']   = 0;
-	$item['duplicate_mode'] = $s['duplicate_mode'];
-	$start                  = 'calendar' === $s['duplicate_mode'] ? substr( $item['date'], 0, 4 ) . '-01-01 00:00:00' : ( new \DateTimeImmutable( $item['date'], wp_timezone() ) )->modify( '-12 months' )->format( 'Y-m-d H:i:s' );
-	foreach ( institution_deliveries( $item['institution'], $item['date'], $start ) as $previous ) {
-		if ( ( $item['id'] ?? 0 ) === $previous['id'] || 'sent' !== $previous['state'] || $previous['duplicate_of'] ) {
+function reconcile_duplicates( $changed ) {
+	$start = ( new \DateTimeImmutable( $changed['date'], wp_timezone() ) )->modify( '-12 months' )->format( 'Y-m-d H:i:s' );
+	$items = institution_deliveries( $changed['institution'], null, $start );
+	$bases = array();
+	$bills = array();
+	foreach ( $items as $item ) {
+		if ( 'sent' !== $item['state'] ) {
 			continue;
 		}
-		if ( same_contact( $item, $previous ) && in_window( $previous['date'], $item['date'], $s['duplicate_mode'] ) ) {
-			$item['duplicate_of'] = $previous['id'];
-			break;
+		if ( $item['date'] >= $changed['date'] ) {
+			$duplicate = 0;
+			foreach ( $bases as $previous ) {
+				if ( same_contact( $item, $previous ) && in_window( $previous['date'], $item['date'], $item['duplicate_mode'] ?? 'calendar' ) ) {
+					$duplicate = $previous['id'];
+					break;
+				}
+			}
+			if ( $duplicate !== $item['duplicate_of'] ) {
+				if ( ! array_key_exists( $item['month'], $bills ) ) {
+					$bills[ $item['month'] ] = bill_for( $item['institution'], $item['month'] );
+				}
+				if ( $item['bill'] || ( $bills[ $item['month'] ] && 'approved' === $bills[ $item['month'] ]['state'] ) ) {
+					return error( 'הקליטה תשנה כפילות בתקופה שכבר אושרה. נדרשת התאמה כספית נפרדת.', 409 );
+				}
+				$item['duplicate_of'] = $duplicate;
+				$result               = save_record( 'lcrm_delivery', $item, $item['id'] );
+				if ( is_wp_error( $result ) ) {
+					return $result;
+				}
+			}
+		}
+		if ( ! $item['duplicate_of'] ) {
+			$bases[] = $item;
 		}
 	}
-	return $item;
+	return data( $changed['id'] );
 }
 /** Capture Elementor records with administrator-defined server-side recipients, never hidden-field recipients. */
 add_action(
@@ -60,38 +82,53 @@ add_action(
 			$value        = $fields[ $config[ $key ] ]['value'] ?? '';
 			$lead[ $key ] = is_scalar( $value ) ? sanitize_text_field( substr( (string) $value, 0, 200 ) ) : '';
 		}
-		// The hook records submission, not proof of receipt. Keep captured leads pending until confirmed.
-		$hash           = hash_hmac( 'sha256', $form_id . '|' . wp_json_encode( $fields ), wp_salt( 'nonce' ) );
-		$source         = 'elementor:' . $hash . ':' . (int) floor( time() / 60 );
-		$capture_result = locked(
-			function () use ( $lead, $config, $source ) {
-				foreach ( $config['institutions'] as $id ) {
-					$item = record_delivery( $lead, $id, $source );
-					if ( is_wp_error( $item ) ) {
-						return $item;
-					}
-					if ( ! is_wp_error( $item ) && 'sent' === $item['state'] && empty( $item['confirmed_at'] ) ) {
-							$item['state']        = 'pending';
-							$item['duplicate_of'] = 0;
-							$saved                = save_record( 'lcrm_delivery', $item, $item['id'] );
-						if ( is_wp_error( $saved ) ) {
-							return $saved;
-						}
-					}
-				}
-				return true;
-			}
-		);
-		if ( is_wp_error( $capture_result ) ) {
-			audit( 'capture_error', 0, array( 'form_id' => $form_id ) );
+		if ( ! normalize_phone( $lead['phone'] ) && ! normalize_email( $lead['email'] ) ) {
 			if ( is_object( $handler ) && method_exists( $handler, 'add_error_message' ) ) {
-				$handler->add_error_message( 'הפנייה לא נקלטה במערכת הניהול. יש לנסות שוב או לפנות לאתר.' );
+				$handler->add_error_message( 'נדרש טלפון או אימייל תקין.' );
 			}
+			audit( 'capture_error', 0, array( 'form_id' => $form_id ) );
+			return;
+		}
+		// Finalize after native metadata has been persisted; never count one submission twice.
+		$key = spl_object_hash( $record );
+		if ( ! isset( $GLOBALS['lcrm_elementor_queue'][ $key ] ) ) {
+			$GLOBALS['lcrm_elementor_queue'][ $key ] = array(
+				'lead'   => $lead,
+				'config' => $config,
+				'source' => 'elementor:' . wp_generate_uuid4(),
+			);
 		}
 	},
 	100,
 	2
 );
+/** Finalize explicitly mapped standalone Elementor forms without any per-lead approval. */
+function flush_elementor_capture() {
+	$queue = $GLOBALS['lcrm_elementor_queue'] ?? array();
+	unset( $GLOBALS['lcrm_elementor_queue'] );
+	if ( function_exists( __NAMESPACE__ . '\\native_has_new_leads' ) && native_has_new_leads() ) {
+		return;
+	}
+	foreach ( $queue as $entry ) {
+		$result = locked(
+			function () use ( $entry ) {
+				foreach ( $entry['config']['institutions'] as $id ) {
+					$item = record_delivery( $entry['lead'], $id, $entry['source'] );
+					if ( is_wp_error( $item ) ) {
+						return $item;
+					}
+				}
+				return true;
+			}
+		);
+		if ( is_wp_error( $result ) ) {
+			audit( 'capture_error', 0, array( 'form_id' => $entry['config']['id'] ) );
+			do_action( 'limu_crm_delivery_error', $result, 0, $entry['source'] );
+		}
+	}
+}
+add_action( 'shutdown', __NAMESPACE__ . '\\flush_elementor_capture', 6 );
+
 /** Trusted PHP adapter hook for existing dispatch code, only after verified success. */
 add_action(
 	'limu_crm_delivery_confirmed',
@@ -99,18 +136,27 @@ add_action(
 		if ( ! is_array( $lead ) || ! is_string( $source ) || '' === $source || strlen( $source ) > 180 ) {
 			return;
 		}
-		$clean = array(
+		$source = sanitize_text_field( $source );
+		if ( '' === $source ) {
+			return;
+		}
+		$clean  = array(
 			'name'  => sanitize_text_field( $lead['name'] ?? '' ),
 			'phone' => sanitize_text_field( $lead['phone'] ?? '' ),
 			'email' => sanitize_email( $lead['email'] ?? '' ),
 			'form'  => sanitize_text_field( $lead['form'] ?? '' ),
 			'date'  => current_time( 'mysql' ),
 		);
-		locked(
+		$result = locked(
 			function () use ( $clean, $institution, $source ) {
-				return record_delivery( $clean, absint( $institution ), sanitize_text_field( $source ) );
+				return record_delivery( $clean, absint( $institution ), $source );
 			}
 		);
+		if ( is_wp_error( $result ) ) {
+			audit( 'dispatch_error', absint( $institution ), array( 'status' => $result->get_error_data()['status'] ?? 500 ) );
+			/** Notify the trusted dispatch integration without exposing a public endpoint. */
+			do_action( 'limu_crm_delivery_error', $result, absint( $institution ), $source );
+		}
 	},
 	10,
 	3
@@ -206,7 +252,7 @@ function import_history( $after ) {
 					)
 				);
 				if ( ! $exists ) {
-					save_record(
+					$result = save_record(
 						'lcrm_delivery',
 						array_merge(
 							$lead,
@@ -222,11 +268,14 @@ function import_history( $after ) {
 							)
 						)
 					);
+					if ( is_wp_error( $result ) ) {
+						return $result;
+					}
 				}
 			} else {
 				$result = record_delivery( $lead, $iid, 'legacy:' . $id, true );
 				if ( is_wp_error( $result ) ) {
-						++$exceptions;
+					return $result;
 				} else {
 								++$created;
 				}

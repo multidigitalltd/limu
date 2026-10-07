@@ -2,9 +2,9 @@
 /**
  * Plugin Name: Limu CRM — Multi Digital
  * Description: פורטל מוסדות, לידים וחיובים חודשי עם בקרת הרשאות. חיבור iCount בשלב נפרד.
- * Version: 0.1.0
+ * Version: 0.1.1
  * Requires at least: 6.6
- * Requires PHP: 8.3
+ * Requires PHP: 7.4.33
  * License: GPL-2.0-or-later
  * Text Domain: limu-crm
  *
@@ -21,11 +21,13 @@ require_once __DIR__ . '/includes/domain.php';
 require_once __DIR__ . '/includes/store.php';
 require_once __DIR__ . '/includes/api.php';
 require_once __DIR__ . '/includes/capture.php';
+require_once __DIR__ . '/includes/native.php';
 require_once __DIR__ . '/includes/security.php';
 require_once __DIR__ . '/includes/turnstile.php';
 
 /** Register private records and the portal route without loading frontend assets globally. */
 function register() {
+	add_option( 'lcrm_live_capture_from', current_time( 'mysql' ), '', false );
 	foreach ( array( 'lcrm_contact', 'lcrm_delivery', 'lcrm_bill', 'lcrm_payment', 'lcrm_audit' ) as $type ) {
 		register_post_type(
 			$type,
@@ -88,17 +90,26 @@ add_action(
 		}
 
 		if ( 'post' === ( isset( $_SERVER['REQUEST_METHOD'] ) ? sanitize_key( wp_unslash( $_SERVER['REQUEST_METHOD'] ) ) : '' ) && ! is_user_logged_in() ) {
-			$nonce = isset( $_POST['_lcrm_login_nonce'] ) && is_string( $_POST['_lcrm_login_nonce'] ) ? sanitize_text_field( wp_unslash( $_POST['_lcrm_login_nonce'] ) ) : '';
+			$GLOBALS['lcrm_login_request'] = true;
+			$nonce                         = isset( $_POST['_lcrm_login_nonce'] ) && is_string( $_POST['_lcrm_login_nonce'] ) ? sanitize_text_field( wp_unslash( $_POST['_lcrm_login_nonce'] ) ) : '';
 			if ( ! wp_verify_nonce( $nonce, 'lcrm_login' ) ) {
 				$GLOBALS['lcrm_login_error'] = 'הבקשה פגה. יש לרענן ולנסות שוב.';
 			} else {
-					$login = isset( $_POST['log'] ) && is_string( $_POST['log'] ) ? sanitize_text_field( wp_unslash( $_POST['log'] ) ) : '';
+				// Validate sizes before authentication, aliases, or external challenge verification.
+				// phpcs:ignore WordPress.Security.ValidatedSanitizedInput -- Check raw length before parsing; the accepted login is immediately unslashed and sanitized.
+				$login = isset( $_POST['log'] ) && is_string( $_POST['log'] ) && strlen( $_POST['log'] ) <= 254 ? sanitize_text_field( wp_unslash( $_POST['log'] ) ) : '';
 					// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Passwords must be passed unchanged to WordPress authentication.
-				$password      = isset( $_POST['pwd'] ) && is_string( $_POST['pwd'] ) ? wp_unslash( $_POST['pwd'] ) : '';
-					$challenge = isset( $_POST['cf-turnstile-response'] ) && is_string( $_POST['cf-turnstile-response'] ) ? sanitize_text_field( wp_unslash( $_POST['cf-turnstile-response'] ) ) : '';
-				if ( (int) get_transient( login_rate_key( $login ) ) >= 10 || ( turnstile_site_key() && ! verify_turnstile( $challenge, 'crm_login' ) ) ) {
-					$key = login_rate_key( $login );
-					set_transient( $key, min( 10, (int) get_transient( $key ) + 1 ), 15 * MINUTE_IN_SECONDS );
+				$password = isset( $_POST['pwd'] ) && is_string( $_POST['pwd'] ) ? wp_unslash( $_POST['pwd'] ) : '';
+				// phpcs:ignore WordPress.Security.ValidatedSanitizedInput -- This raw type/length check only rejects malformed challenges; accepted tokens are sanitized below.
+				$challenge_invalid = isset( $_POST['cf-turnstile-response'] ) && ( ! is_string( $_POST['cf-turnstile-response'] ) || strlen( $_POST['cf-turnstile-response'] ) > 2048 );
+				$challenge         = ! $challenge_invalid && isset( $_POST['cf-turnstile-response'] ) ? sanitize_text_field( wp_unslash( $_POST['cf-turnstile-response'] ) ) : '';
+				if ( ! $login || ! $password || strlen( $password ) > 4096 || $challenge_invalid ) {
+					login_failed_attempt( $login );
+					$user = new \WP_Error( 'lcrm_credentials', 'לא ניתן לאמת את הכניסה.' );
+				} elseif ( login_is_limited( $login ) ) {
+					$user = new \WP_Error( 'lcrm_login_limited', 'לא ניתן לאמת את הכניסה.' );
+				} elseif ( turnstile_site_key() && ! verify_turnstile( $challenge, 'crm_login' ) ) {
+					login_failed_attempt( $login );
 					$user = new \WP_Error( 'lcrm_challenge', 'לא ניתן לאמת את הכניסה.' );
 				} else {
 					$user = wp_signon(
@@ -121,12 +132,15 @@ add_action(
 		nocache_headers();
 		header( 'X-Robots-Tag: noindex, nofollow', true );
 		header( 'X-Content-Type-Options: nosniff' );
-		wp_enqueue_style( 'limu-crm', plugins_url( 'assets/crm.min.css', LIMU_CRM_FILE ), array(), '0.1.0' );
+		header( 'X-Frame-Options: SAMEORIGIN' );
+		header( "Content-Security-Policy: frame-ancestors 'self'", false );
+		header( 'Referrer-Policy: no-referrer' );
+		wp_enqueue_style( 'limu-crm', plugins_url( 'assets/crm.min.css', LIMU_CRM_FILE ), array(), '0.1.1' );
 		wp_enqueue_script(
 			'limu-crm-access',
 			plugins_url( 'assets/access.min.js', LIMU_CRM_FILE ),
 			array(),
-			'0.1.0',
+			'0.1.1',
 			array(
 				'in_footer' => true,
 				'strategy'  => 'defer',
@@ -137,7 +151,7 @@ add_action(
 				'limu-crm',
 				plugins_url( 'assets/crm.min.js', LIMU_CRM_FILE ),
 				array(),
-				'0.1.0',
+				'0.1.1',
 				array(
 					'in_footer' => true,
 					'strategy'  => 'defer',

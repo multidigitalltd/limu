@@ -1,0 +1,14 @@
+No syntax errors detected in limu-crm/includes/native.php
+No syntax errors detected in limu-crm/includes/security.php
+No syntax errors detected in limu-crm/includes/api.php
+No syntax errors detected in limu-crm/includes/turnstile.php
+No syntax errors detected in limu-crm/includes/capture.php
+No syntax errors detected in limu-crm/includes/domain.php
+No syntax errors detected in limu-crm/includes/store.php
+No syntax errors detected in limu-crm/templates/portal.php
+No syntax errors detected in limu-crm/limu-crm.php
+No syntax errors detected in tests/native-capture.php
+No syntax errors detected in tests/concurrent-payment.php
+No syntax errors detected in tests/auth-security.php
+No syntax errors detected in tests/security-review.php
+No syntax errors detected in tests/integration.php

@@ -5,13 +5,15 @@ const path = require('node:path');
  const credentials=JSON.parse(fs.readFileSync(process.env.LIMU_TEST_LOGIN,'utf8'));
  const axe=fs.readFileSync(process.env.LIMU_AXE_PATH,'utf8');
  const browser=await chromium.launch({headless:true,executablePath:process.env.LIMU_CHROMIUM || '/usr/bin/chromium',args:['--no-sandbox']});
+ const base=process.env.LIMU_TEST_URL||'http://127.0.0.1:8090';
+ if(new URL(base).hostname!=='127.0.0.1')throw new Error('Browser test requires local disposable fixtures');
  const page=await browser.newPage({locale:'he-IL',viewport:{width:1440,height:1000}});
  const errors=[];page.on('pageerror',error=>errors.push(error.message));
  const checks=[];
  async function check(condition,label){if(!condition)throw new Error(label);checks.push(label);console.log('PASS',label);}
  async function accessibility(label){await page.addScriptTag({content:axe});const r=await page.evaluate(()=>axe.run(document.body,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa','wcag22aa']}}));if(r.violations.length)throw new Error(label+': '+JSON.stringify(r.violations.map(v=>({id:v.id,nodes:v.nodes.map(n=>n.target)}))));checks.push('Accessibility '+label);console.log('PASS Accessibility',label);}
  try {
- await page.goto('http://127.0.0.1:8090/crm/');await check(await page.getByRole('heading',{name:'ברוכים הבאים'}).isVisible(),'Dedicated CRM login loads');await accessibility('login');
+ await page.goto(base+'/crm/');await check(await page.getByRole('heading',{name:'ברוכים הבאים'}).isVisible(),'Dedicated CRM login loads');await accessibility('login');
  if(await page.getByRole('button',{name:'הבנתי',exact:true}).isVisible())await page.getByRole('button',{name:'הבנתי',exact:true}).click();
  await page.getByLabel('שם משתמש או כתובת אימייל').fill(credentials.user);await page.getByLabel('סיסמה',{exact:true}).fill(credentials.password);await page.getByRole('button',{name:'כניסה למערכת'}).click();
  await page.getByRole('heading',{name:'התמונה המלאה, במקום אחד'}).waitFor();await accessibility('dashboard');
@@ -30,7 +32,7 @@ const path = require('node:path');
  await page.setViewportSize({width:1440,height:1000});await page.getByRole('button',{name:'דוחות',exact:false}).click();await page.getByRole('heading',{name:'דוחות וסיכומים',exact:true}).waitFor();await page.evaluate(()=>{window.print=()=>{};});await page.getByRole('button',{name:'הדפסה / שמירה כ־PDF'}).click();await page.waitForSelector('#print-snapshot',{state:'attached'});await check(await page.locator('#print-snapshot tbody tr').count()===2,'Print report includes all matching bills');await page.emulateMedia({media:'print'});await page.pdf({path:process.env.LIMU_SCREENSHOT_DIR+'/demo-billing.pdf',preferCSSPageSize:true,printBackground:true});await check(fs.statSync(process.env.LIMU_SCREENSHOT_DIR+'/demo-billing.pdf').size>1000,'Hebrew PDF report renders');await page.emulateMedia({media:'screen'});await page.evaluate(()=>window.dispatchEvent(new Event('afterprint')));
  await check(errors.length===0,'No browser JavaScript errors');
  if(process.env.LIMU_MEMBER_LOGIN){
-  const member=JSON.parse(fs.readFileSync(process.env.LIMU_MEMBER_LOGIN,'utf8'));const p=await browser.newPage();await p.goto('http://127.0.0.1:8090/crm/');await p.getByLabel('שם משתמש או כתובת אימייל').fill(member.user);await p.getByLabel('סיסמה',{exact:true}).fill(member.password);await p.getByRole('button',{name:'כניסה למערכת'}).click();await p.getByRole('heading',{name:'התמונה המלאה, במקום אחד'}).waitFor();
+  const member=JSON.parse(fs.readFileSync(process.env.LIMU_MEMBER_LOGIN,'utf8'));const p=await browser.newPage();await p.goto(base+'/crm/');await p.getByLabel('שם משתמש או כתובת אימייל').fill(member.user);await p.getByLabel('סיסמה',{exact:true}).fill(member.password);await p.getByRole('button',{name:'כניסה למערכת'}).click();await p.getByRole('heading',{name:'התמונה המלאה, במקום אחד'}).waitFor();
   await check(await p.locator('[data-view="institutions"]').count()===0,'Institution login hides manager navigation');
   const protectedResult=await p.evaluate(async()=>{const r=await fetch(window.LimuCRM.api+'settings',{method:'POST',headers:{'X-WP-Nonce':window.LimuCRM.nonce,'Content-Type':'application/json'},body:JSON.stringify({duplicate_mode:'rolling',start_date:''})});return r.status;});await check(protectedResult===403,'Real cookie-authenticated institution cannot change settings');await p.close();
  }

@@ -45,7 +45,7 @@ add_action(
 				)
 			);
 		}
-		foreach ( array( 'settings', 'agreement', 'member', 'prepare', 'approve', 'payment', 'import', 'confirm', 'treatment', 'remap' ) as $route ) {
+		foreach ( array( 'settings', 'agreement', 'member', 'prepare', 'approve', 'payment', 'import', 'treatment', 'remap' ) as $route ) {
 			register_rest_route(
 				'limu-crm/v1',
 				'/' . $route,
@@ -101,15 +101,14 @@ function institution_list() {
 /**
  * Remove internal and identifying lookup fields before returning a record.
  *
- * @param string $type Private record post type.
- * @param array  $item Private record payload.
+ * @param array $item Private record payload.
  * @return mixed Operation result or validation error.
  */
-function public_item( $type, $item ) {
+function public_item( $item ) {
 	unset( $item['phone_key'], $item['email_key'], $item['request_key'] );
 	if ( ! manager() ) {
 		$item['count'] = isset( $item['lines'] ) ? count( $item['lines'] ) : 0;
-		unset( $item['source'], $item['actor'], $item['approved_by'], $item['lines'], $item['notes'], $item['evidence'], $item['confirmed_by'], $item['contact'], $item['legacy_id'] );
+		unset( $item['source'], $item['actor'], $item['approved_by'], $item['lines'], $item['notes'], $item['evidence'], $item['confirmed_by'], $item['contact'], $item['legacy_id'], $item['origin_live'], $item['capture_via'], $item['capture_error'] );
 		if ( isset( $item['duplicate_of'] ) ) {
 			$item['duplicate_of'] = (bool) $item['duplicate_of'];
 		}
@@ -128,6 +127,23 @@ function read_api( $request ) {
 		if ( null !== $value && ! is_scalar( $value ) ) {
 			return error( 'פרמטר לא תקין.' );
 		}
+		$limits = array(
+			'target'      => 20,
+			'institution' => 10,
+			'month'       => 7,
+			'state'       => 30,
+			'page'        => 7,
+			'search'      => 200,
+		);
+		if ( null !== $value && ( is_bool( $value ) || strlen( (string) $value ) > $limits[ $key ] ) ) {
+			return error( 'פרמטר לא תקין.' );
+		}
+		if ( in_array( $key, array( 'institution', 'page' ), true ) && null !== $value && '' !== $value && ! preg_match( '/^\d+$/D', (string) $value ) ) {
+			return error( 'מזהה או עמוד לא תקין.' );
+		}
+		if ( 'month' === $key && null !== $value && '' !== $value && ! preg_match( '/^\d{4}-(0[1-9]|1[0-2])$/D', (string) $value ) ) {
+			return error( 'חודש לא תקין.' );
+		}
 	}
 	$route = basename( $request->get_route() );
 	if ( 'bootstrap' === $route ) {
@@ -138,7 +154,6 @@ function read_api( $request ) {
 			'settings'     => manager() ? settings() : null,
 			'today'        => current_time( 'Y-m-d' ),
 			'month'        => current_time( 'Y-m' ),
-			'icount'       => false,
 		);
 	}
 	if ( 'summary' === $route ) {
@@ -190,8 +205,8 @@ function read_api( $request ) {
 		} return export_xlsx( $target, $result );
 	}
 	$result['items'] = array_map(
-		function ( $item ) use ( $target ) {
-			return public_item( $target, $item );
+		function ( $item ) {
+			return public_item( $item );
 		},
 		$result['items']
 	);
@@ -204,19 +219,31 @@ function read_api( $request ) {
  * @return mixed Operation result or validation error.
  */
 function write_api( $request ) {
+	if ( strlen( $request->get_body() ) > 131072 ) {
+		return error( 'הבקשה גדולה מדי.', 413 );
+	}
 	$input = $request->get_json_params();
 	if ( ! is_array( $input ) ) {
 		return error( 'בקשה לא תקינה.' );
 	}
 	$route = basename( $request->get_route() );
 	foreach ( $input as $key => $value ) {
+		if ( is_string( $value ) && strlen( $value ) > 4096 ) {
+			return error( 'שדה ארוך מדי.' );
+		}
+		if ( 'automatic' === $key && ! is_bool( $value ) ) {
+			return error( 'הגדרת אוטומציה לא תקינה.' );
+		}
+		if ( in_array( $key, array( 'institution', 'bill', 'id', 'after' ), true ) && ( ! is_scalar( $value ) || is_bool( $value ) || ! preg_match( '/^\d{1,10}$/D', (string) $value ) ) ) {
+			return error( 'מזהה לא תקין.' );
+		}
 		if ( in_array( $key, array( 'forms', 'institutions', 'ids' ), true ) ) {
 			if ( ! is_array( $value ) || count( $value ) > 100 ) {
 				return error( 'רשימת נתונים לא תקינה.' );
 			}
 			if ( 'forms' !== $key ) {
 				foreach ( $value as $member ) {
-					if ( ! is_scalar( $member ) ) {
+					if ( ! is_scalar( $member ) || is_bool( $member ) || ! preg_match( '/^\d{1,10}$/D', (string) $member ) ) {
 						return error( 'מזהה לא תקין.' );
 					}
 				}
@@ -243,6 +270,7 @@ function write_api( $request ) {
 			return error( 'מיפוי טפסים לא תקין.' );
 		}
 		$clean_forms = array();
+		$form_ids    = array();
 		foreach ( $forms as $form ) {
 			if ( ! is_array( $form ) ) {
 				return error( 'מיפוי טופס לא תקין.' );
@@ -252,18 +280,19 @@ function write_api( $request ) {
 					return error( 'שדה מיפוי לא תקין.' );
 				}
 			}
-			if ( ! isset( $form['institutions'] ) || ! is_array( $form['institutions'] ) || array_filter(
+			if ( ! isset( $form['institutions'] ) || ! is_array( $form['institutions'] ) || count( $form['institutions'] ) > 100 || array_filter(
 				$form['institutions'],
 				function ( $value ) {
-					return ! is_scalar( $value );
+					return ! is_scalar( $value ) || is_bool( $value ) || ! preg_match( '/^\d{1,10}$/D', (string) $value );
 				}
 			) ) {
 				return error( 'מוסדות טופס לא תקינים.' );
 			}
-			if ( ! is_array( $form ) || ! preg_match( '/^[a-zA-Z0-9_-]{1,60}$/D', (string) ( $form['id'] ?? '' ) ) ) {
+			if ( ! preg_match( '/^[a-zA-Z0-9_-]{1,60}$/D', (string) ( $form['id'] ?? '' ) ) || in_array( $form['id'], $form_ids, true ) ) {
 				return error( 'מזהה טופס לא תקין.' );
 			}
-			$ids = array_values( array_unique( array_map( 'absint', (array) ( $form['institutions'] ?? array() ) ) ) );
+			$form_ids[] = $form['id'];
+			$ids        = array_values( array_unique( array_map( 'absint', (array) ( $form['institutions'] ?? array() ) ) ) );
 			foreach ( $ids as $iid ) {
 				if ( 'institutions' !== get_post_type( $iid ) ) {
 						return error( 'מוסד לא תקין במיפוי טופס.' );
@@ -274,6 +303,9 @@ function write_api( $request ) {
 			}
 			$fields = array();
 			foreach ( array( 'name', 'phone', 'email' ) as $key ) {
+				if ( strlen( (string) ( $form[ $key ] ?? '' ) ) > 60 ) {
+					return error( 'מזהה שדה ארוך מדי.' );
+				}
 					$fields[ $key ] = sanitize_key( $form[ $key ] ?? '' );
 			}
 			if ( ! $fields['phone'] && ! $fields['email'] ) {
@@ -410,6 +442,9 @@ function write_api( $request ) {
 		return array( 'saved' => true );
 	}
 	if ( 'prepare' === $route ) {
+		if ( count( $input['institutions'] ?? array() ) > 20 ) {
+			return error( 'ניתן להכין עד 20 מוסדות בבקשה.' );
+		}
 		$month = sanitize_text_field( $input['month'] ?? '' );
 		$ids   = array_slice( array_unique( array_map( 'absint', (array) ( $input['institutions'] ?? array() ) ) ), 0, 20 );
 		if ( ! $ids ) {
@@ -436,6 +471,9 @@ function write_api( $request ) {
 		return array( 'results' => $results );
 	}
 	if ( 'approve' === $route ) {
+		if ( count( $input['ids'] ?? array() ) > 20 ) {
+			return error( 'ניתן לאשר עד 20 חיובים בבקשה.' );
+		}
 		$ids = array_slice( array_unique( array_map( 'absint', (array) ( $input['ids'] ?? array() ) ) ), 0, 20 );
 		if ( ! $ids ) {
 			return error( 'יש לבחור חיובים.' );
@@ -456,31 +494,6 @@ function write_api( $request ) {
 	}
 	if ( 'payment' === $route ) {
 		return record_payment( absint( $input['bill'] ?? 0 ), $input );
-	}
-	if ( 'confirm' === $route ) {
-		$id = absint( $input['id'] ?? 0 );
-		if ( 'lcrm_delivery' !== get_post_type( $id ) ) {
-			return error( 'פנייה לא נמצאה.', 404 );
-		}
-		$item = data( $id );
-		if ( 'pending' !== $item['state'] ) {
-			return error( 'ניתן לאמת רק פנייה הממתינה למסירה.' );
-		}
-		$existing_bill = bill_for( $item['institution'], $item['month'] );
-		if ( $existing_bill && 'approved' === $existing_bill['state'] ) {
-			return error( 'התקופה כבר אושרה. נדרשת התאמה כספית נפרדת; הרשומה לא תחויב אוטומטית.', 409 );
-		}
-		$item['state']        = 'sent';
-		$item['confirmed_by'] = get_current_user_id();
-		$item['confirmed_at'] = current_time( 'mysql' );
-		$item['evidence']     = sanitize_text_field( substr( (string) ( $input['evidence'] ?? '' ), 0, 200 ) );
-		if ( ! $item['evidence'] ) {
-			return error( 'יש לציין אסמכתה למסירה.' );
-		}
-		$item   = recalculate_duplicate( $item );
-		$result = save_record( 'lcrm_delivery', $item, $id );
-		audit( 'delivery_confirmed', $id );
-		return $result;
 	}
 	if ( 'treatment' === $route ) {
 		$id    = absint( $input['id'] ?? 0 );
@@ -517,7 +530,7 @@ function write_api( $request ) {
 		}
 		$results = array();
 		foreach ( $destinations as $institution ) {
-			$result = record_delivery( $item, $institution, $item['source'], true );
+			$result = record_delivery( $item, $institution, $item['source'], empty( $item['origin_live'] ) );
 			if ( is_wp_error( $result ) ) {
 				return $result;
 
