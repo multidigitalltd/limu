@@ -1,0 +1,13 @@
+No syntax errors detected in limu-crm/includes/api.php
+No syntax errors detected in limu-crm/includes/assets.php
+No syntax errors detected in limu-crm/includes/capture.php
+No syntax errors detected in limu-crm/includes/domain.php
+No syntax errors detected in limu-crm/includes/icount-api.php
+No syntax errors detected in limu-crm/includes/icount.php
+No syntax errors detected in limu-crm/includes/mapping-repair.php
+No syntax errors detected in limu-crm/includes/native.php
+No syntax errors detected in limu-crm/includes/security.php
+No syntax errors detected in limu-crm/includes/store.php
+No syntax errors detected in limu-crm/includes/turnstile.php
+No syntax errors detected in limu-crm/limu-crm.php
+No syntax errors detected in limu-crm/templates/portal.php

@@ -1,0 +1,31 @@
+{
+  "method": "Actual CRM source_name/native_titles/legacy_institutions functions on PHP 7.4.33 and 8.4.26 with read-only WordPress stubs built from public institution/course/study/page/route titles, slugs and numeric parent metadata from the uploaded backup. No database was restored or mutated. Only aggregate mapping counts are included.",
+  "checks": [
+    {
+      "php": "7.4.33",
+      "published_sources": 4622,
+      "before_mapped_sources": 3860,
+      "after_mapped_sources": 4021,
+      "before_institution_assignments": 4008,
+      "after_institution_assignments": 4202,
+      "recovered_sources": 161,
+      "recovered_assignments": 194,
+      "remaining_unmapped": 601,
+      "previously_mapped_sources_lost": 0,
+      "previously_mapped_recipient_sets_changed": 0
+    },
+    {
+      "php": "8.4.26",
+      "published_sources": 4622,
+      "before_mapped_sources": 3860,
+      "after_mapped_sources": 4021,
+      "before_institution_assignments": 4008,
+      "after_institution_assignments": 4202,
+      "recovered_sources": 161,
+      "recovered_assignments": 194,
+      "remaining_unmapped": 601,
+      "previously_mapped_sources_lost": 0,
+      "previously_mapped_recipient_sets_changed": 0
+    }
+  ]
+}

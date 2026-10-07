@@ -1,0 +1,14 @@
+PASS Login and email aliases share the failure budget
+PASS Login case does not create a separate failure budget
+PASS Pair lock rejects WordPress password authentication
+PASS Exhausted pair is rejected before password hashing
+PASS Email authentication cannot bypass pre-hash pair protection
+PASS Blocked retries do not extend an existing pair lockout
+PASS CRM peer spray budget rejects a fresh account before hashing
+PASS Exhausted CRM peer cannot create buckets for rotated usernames
+PASS Rotated usernames cannot extend an exhausted peer lockout
+PASS CRM peer budget does not lock unrelated WordPress authentication
+PASS Unknown usernames contribute to the CRM peer spray budget
+PASS Successful login clears the canonical account pair budget
+PASS Successful login preserves the shared peer spray budget
+OK 13 authentication security assertions

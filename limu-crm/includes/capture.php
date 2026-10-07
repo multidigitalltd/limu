@@ -88,6 +88,20 @@ add_action(
 	3
 );
 /**
+ * Canonicalize public source names without approximate or substring matching.
+ *
+ * @param mixed $value Public institution or study title.
+ * @return string Canonical name, or empty for malformed input.
+ */
+function source_name( $value ) {
+	if ( ! is_string( $value ) && ! is_int( $value ) ) {
+		return '';
+	}
+	$value = html_entity_decode( (string) $value, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+	$value = preg_replace( '/[\x{200E}\x{200F}\x{FEFF}]/u', '', $value );
+	return is_string( $value ) ? trim( (string) preg_replace( '/[\p{Z}\s]+/u', ' ', $value ) ) : '';
+}
+/**
  * Resolve legacy names exactly; ambiguous or partially mapped lists remain exceptions.
  *
  * @param mixed $value Input value to validate or normalize.
@@ -95,16 +109,23 @@ add_action(
  * @return mixed Operation result or validation error.
  */
 function legacy_institutions( $value, $titles ) {
-	if ( isset( $titles[ $value ] ) && 1 === count( $titles[ $value ] ) ) {
-		return $titles[ $value ];
+	$value = source_name( $value );
+	if ( '' === $value ) {
+		return array();
 	}
-	if ( ctype_digit( (string) $value ) && 'institutions' === get_post_type( (int) $value ) ) {
+	if ( array_key_exists( $value, $titles ) ) {
+		return 1 === count( $titles[ $value ] ) ? $titles[ $value ] : array();
+	}
+	if ( ctype_digit( $value ) && 'institutions' === get_post_type( (int) $value ) ) {
 		return array( (int) $value );
 	}
-	$parts = preg_split( '/,\s*/u', (string) $value );
+	$parts = preg_split( '/,\s*/u', $value );
 	$ids   = array();
 	foreach ( $parts as $part ) {
-		$part = trim( $part );
+		$part = source_name( $part );
+		if ( '' === $part ) {
+			continue;
+		}
 		if ( ! isset( $titles[ $part ] ) || 1 !== count( $titles[ $part ] ) ) {
 			return array();
 		} $ids[] = $titles[ $part ][0];
@@ -119,19 +140,7 @@ function legacy_institutions( $value, $titles ) {
  */
 function import_history( $after ) {
 	global $wpdb;
-	$institutions = get_posts(
-		array(
-			'post_type'      => 'institutions',
-			'post_status'    => array( 'publish', 'draft' ),
-			'posts_per_page' => -1,
-			'fields'         => 'ids',
-		)
-	);
-	$titles       = array();
-	foreach ( $institutions as $id ) {
-		$title              = get_post_field( 'post_title', $id, 'raw' );
-		$titles[ $title ][] = $id;
-	}
+	$titles = native_titles();
 	// phpcs:ignore WordPress.DB.DirectDatabaseQuery -- Live, admin-only import cursor; caching would skip changed rows.
 	$ids = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE post_type = %s AND post_status = %s AND ID > %d ORDER BY ID ASC LIMIT %d", 'leads', 'publish', $after, 50 ) );
 	update_meta_cache( 'post', $ids );
@@ -150,7 +159,7 @@ function import_history( $after ) {
 	$created    = 0;
 	foreach ( $ids as $id ) {
 		$post         = get_post( $id );
-		$value        = (string) get_post_meta( $id, 'institution', true );
+		$value        = get_post_meta( $id, 'institution', true );
 		$destinations = legacy_institutions( $value, $titles );
 		$lead         = array(
 			'name'      => sanitize_text_field( get_post_meta( $id, 'full-name', true ) ),

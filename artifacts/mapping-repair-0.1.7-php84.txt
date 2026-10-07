@@ -1,0 +1,59 @@
+PASS Ordinary requests cannot execute the cron-only repair or move its cursor
+PASS Historical repair has no public REST endpoint
+PASS A failed upper-bound query cannot permanently mark historical repair complete
+PASS An actual approved billing snapshot protects the historical repair test period
+PASS A transient batch_metadata read failure leaves the exception and cursor retryable instead of treating it as unresolved
+PASS A transient source_post read failure leaves the exception and cursor retryable instead of treating it as unresolved
+PASS A transient source_metadata read failure leaves the exception and cursor retryable instead of treating it as unresolved
+PASS A second-recipient persistence failure rolls back the first recipient, exception status and repair cursor
+PASS A safe retry creates both exact recipients and closes the exception once
+PASS Historical recipient preserves the captured source
+PASS Historical recipient preserves the captured contact
+PASS Historical recipient preserves the captured legacy_id
+PASS Historical recipient preserves the captured date
+PASS Historical recipient preserves the captured month
+PASS Historical recipient preserves the captured phone_key
+PASS Historical recipient preserves the captured email_key
+PASS Historical recipient preserves the captured duplicate_mode
+PASS Historical recipient preserves the captured notes
+PASS Historical recipient preserves the captured treatment
+PASS Repair preserves historical-only classification without a bill or live promotion
+PASS Historical recipient preserves the captured source
+PASS Historical recipient preserves the captured contact
+PASS Historical recipient preserves the captured legacy_id
+PASS Historical recipient preserves the captured date
+PASS Historical recipient preserves the captured month
+PASS Historical recipient preserves the captured phone_key
+PASS Historical recipient preserves the captured email_key
+PASS Historical recipient preserves the captured duplicate_mode
+PASS Historical recipient preserves the captured notes
+PASS Historical recipient preserves the captured treatment
+PASS Repair preserves historical-only classification without a bill or live promotion
+PASS Repair in an approved service month leaves the approved bill and its original line unchanged
+PASS A completed cron retry is idempotent
+PASS Failure to close the exception rolls back all new recipients and leaves a retryable cursor
+PASS Commit failure invalidates the advanced option/post caches as well as rolling back their database writes
+PASS A failed commit can be retried without losing or duplicating the historical mapping
+PASS Unsafe, malformed, ambiguous or conflicting historical sources stay unchanged: 19680
+PASS Unsafe, malformed, ambiguous or conflicting historical sources stay unchanged: 19682
+PASS Unsafe, malformed, ambiguous or conflicting historical sources stay unchanged: 19684
+PASS Unsafe, malformed, ambiguous or conflicting historical sources stay unchanged: 19686
+PASS Unsafe, malformed, ambiguous or conflicting historical sources stay unchanged: 19688
+PASS Unsafe, malformed, ambiguous or conflicting historical sources stay unchanged: 19690
+PASS Unsafe, malformed, ambiguous or conflicting historical sources stay unchanged: 19692
+PASS Unsafe, malformed, ambiguous or conflicting historical sources stay unchanged: 19694
+PASS Unsafe, malformed, ambiguous or conflicting historical sources stay unchanged: 19697
+PASS Unsafe, malformed, ambiguous or conflicting historical sources stay unchanged: 19699
+PASS Unsafe, malformed, ambiguous or conflicting historical sources stay unchanged: 19702
+PASS Repair cannot change a source already represented by an active recipient
+PASS A failed existing-recipient query cannot treat the source as new or modify a live recipient
+PASS Postflight validation refuses a live recipient returned by the storage adapter even if the initial conflict lookup missed it
+PASS An exact existing historical recipient is reused unchanged while only the missing recipient is created
+PASS Older historical exceptions do not gain a fabricated prior duplicate policy or lose their original field absence
+PASS Each background batch scans at most 50 existing exceptions using a frozen upper ID
+PASS Later exceptions beyond the frozen boundary are not silently included in the upgrade repair
+PASS A completed migration removes its pending background event
+PASS Cron repair audit stores only anonymous batch counts without source IDs or contact details
+PASS Historical repair performs no external HTTP, messages or fiscal document requests
+PASS Corrupt saved cursor state fails closed without inventing a new boundary
+OK 58 historical mapping repair assertions

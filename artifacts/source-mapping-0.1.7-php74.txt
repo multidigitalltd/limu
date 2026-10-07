@@ -1,0 +1,55 @@
+PASS Direct institution titles retain their exact institution
+PASS Draft institutions remain valid reporting destinations
+PASS A numeric existing institution ID remains a valid destination
+PASS HTML-encoded quotes are canonicalized to the same exact institution title
+PASS Unicode whitespace and direction markers preserve exact source identity
+PASS A saved decoded institution permalink supplies its explicit former public spelling
+PASS Similar names and added articles do not create guessed aliases
+PASS Empty or malformed source input remains unresolved
+PASS Empty or malformed source input remains unresolved
+PASS Empty or malformed source input remains unresolved
+PASS Empty or malformed source input remains unresolved
+PASS Empty or malformed source input remains unresolved
+PASS A unique course title resolves through its explicit institution_acf parent
+PASS A unique study title resolves through its explicit mosad parent
+PASS The existing numeric institution parent is accepted for a legacy course
+PASS A completely mapped course list fans out to distinct recipients and ignores an empty trailing separator
+PASS Repeated recipient entries do not create duplicate destinations
+PASS One unknown recipient leaves the entire source list unresolved
+PASS A complete exact study title containing a comma is checked before list splitting
+PASS Several exact course records are safe only when every relationship agrees on one institution
+PASS Same-title courses with different institutions fail closed
+PASS Catalog results refresh after a conflicting course is removed in the same request
+PASS A changed study relationship is read again without a stale request catalog
+PASS A missing study parent remains unresolved rather than guessed
+PASS A array study parent remains unresolved rather than guessed
+PASS A zero study parent remains unresolved rather than guessed
+PASS A negative study parent remains unresolved rather than guessed
+PASS A dangling study parent remains unresolved rather than guessed
+PASS A nonnumeric study parent remains unresolved rather than guessed
+PASS Conflicting duplicate parent metadata rows fail closed
+PASS Conflicting current and legacy course parents cannot select the first value
+PASS A course title also used by a generic routes cannot prove one recipient
+PASS A course title also used by a generic page cannot prove one recipient
+PASS A generic route blocks an institution slug alias even when no course has that title
+PASS Removing the ambiguous generic route restores the explicit permalink alias
+PASS An exact institution title retains authority over another institution inferred slug alias
+PASS An explicit institution title remains authoritative when an unrelated course or generic route shares it
+PASS A numeric course title cannot replace the explicit numeric ID of another institution
+PASS A numeric exact institution title preserves its authority over an unrelated post ID
+PASS Two institutions with the same exact title remain ambiguous
+PASS Fault fixtures begin with an ambiguous same-title relationship
+PASS A suppressed catalog selection SQL failure returns a safe error instead of a recipient catalog
+PASS Catalog SQL errors never expose database statements or column details
+PASS An ambiguous source remains unresolved after the failed read and rollback
+PASS A suppressed relationship metadata SQL failure returns a safe error instead of a recipient catalog
+PASS Catalog SQL errors never expose database statements or column details
+PASS An ambiguous source remains unresolved after the failed read and rollback
+PASS A fully cached catalog ignores an unrelated stale SQL error without issuing a database query
+PASS Historical import uses exact course and study parents to create one record for each recipient
+PASS New historical source mappings preserve dates and remain outside billing
+PASS Repeating historical import preserves mapped source records without duplication
+PASS Native observation reuses the same stable source records and resolved recipients
+PASS Source mapping never changes billing or duplicate settings
+
+53 source mapping assertions passed.

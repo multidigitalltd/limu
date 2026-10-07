@@ -90,6 +90,8 @@
 .lcrm .rate-alert strong { display: block; font-size: 13px; }
 .lcrm .rate-alert p { font-size: 12px; margin-block: 3px 0; }
 .lcrm .rate-alert .button { flex-shrink: 0; border-color: #e6cba4; color: #73531f; }
+.lcrm #assignment-alert { gap: 20px; margin-block-end: 18px; }
+.lcrm #assignment-alert p { max-width: 840px; }
 .lcrm .filters { display: flex; gap: 13px; align-items: end; flex-wrap: wrap; margin-block-end: 23px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
 .lcrm .filters > div { min-width: 150px; flex: 1 1 150px; max-width: 245px; }
 .lcrm .filters input, .lcrm .filters select { width: 100%; }

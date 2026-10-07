@@ -1,0 +1,56 @@
+PASS Manager can save a bounded custom period through the REST API
+PASS Invalid API period is rejected and preserves the previous settings
+PASS Invalid API period is rejected and preserves the previous settings
+PASS Invalid API period is rejected and preserves the previous settings
+PASS Invalid API period is rejected and preserves the previous settings
+PASS Unknown period selector cannot change manager settings
+PASS rolling does not match an expired candidate
+PASS rolling expires exactly at its boundary
+PASS rolling matches one second inside its boundary
+PASS days_30 does not match an expired candidate
+PASS days_30 expires exactly at its boundary
+PASS days_30 matches one second inside its boundary
+PASS days_90 does not match an expired candidate
+PASS days_90 expires exactly at its boundary
+PASS days_90 matches one second inside its boundary
+PASS days_180 does not match an expired candidate
+PASS days_180 expires exactly at its boundary
+PASS days_180 matches one second inside its boundary
+PASS months_24 does not match an expired candidate
+PASS months_24 expires exactly at its boundary
+PASS months_24 matches one second inside its boundary
+PASS days:45 does not match an expired candidate
+PASS days:45 expires exactly at its boundary
+PASS days:45 matches one second inside its boundary
+PASS Calendar policy resets on January 1 and includes the start of the new year
+PASS Existing rolling anniversary semantics remain unchanged across leap day
+PASS A future candidate never identifies an earlier delivery as a duplicate
+PASS Empty identities never match for any duplicate period
+PASS Additional periods preserve phone OR email matching
+PASS Custom policies freeze valid minimum and maximum day counts
+PASS Invalid custom day count is rejected without broadening billability
+PASS Invalid custom day count is rejected without broadening billability
+PASS Invalid custom day count is rejected without broadening billability
+PASS Invalid custom day count is rejected without broadening billability
+PASS Malformed saved policy fails closed
+PASS Malformed saved policy fails closed
+PASS Malformed saved policy fails closed
+PASS days_30 capture persists its policy and excludes the exact expired boundary
+PASS days_30 capture still treats email alone as a duplicate
+PASS days_90 capture persists its policy and excludes the exact expired boundary
+PASS days_90 capture still treats email alone as a duplicate
+PASS days_180 capture persists its policy and excludes the exact expired boundary
+PASS days_180 capture still treats email alone as a duplicate
+PASS months_24 capture persists its policy and excludes the exact expired boundary
+PASS months_24 capture still treats email alone as a duplicate
+PASS custom capture persists its policy and excludes the exact expired boundary
+PASS custom capture still treats email alone as a duplicate
+PASS Maximum custom period finds a qualifying anchor almost ten years old
+PASS Out-of-order capture uses each delivery original custom period after settings change
+PASS Two-year chain initially suppresses a matching later delivery
+PASS Reconciliation reads anchors beyond one year and duplicates do not renew the two-year window
+PASS Approved-period fixture charges only its unrelated live delivery
+PASS Extended-period bill can be approved normally
+PASS Earlier two-year anchor cannot change an excluded duplicate in an approved period
+PASS Immutable-period conflict rolls back the new anchor and all preceding chain edits
+OK 55 duplicate-period assertions

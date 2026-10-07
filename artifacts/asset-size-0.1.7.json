@@ -1,0 +1,20 @@
+{
+  "version": "0.1.7",
+  "assets": {
+    "crm.min.js": {
+      "bytes": 75331,
+      "gzip_bytes": 16208,
+      "sha256": "193f90e5ba261ed896781105f56929df5a4e66d99f9793a291d7e2f5cde94025"
+    },
+    "crm.min.css": {
+      "bytes": 24222,
+      "gzip_bytes": 5743,
+      "sha256": "5f1c223dee47aa8104956f98cfb61e787849ef62d22a69ee8c0d99bda411c24b"
+    },
+    "privacy.min.js": {
+      "bytes": 372,
+      "gzip_bytes": 226,
+      "sha256": "454062f33a47e3dafb24caf095387cc2dd562e8188f82accbcdbaffbe8eb473a"
+    }
+  }
+}

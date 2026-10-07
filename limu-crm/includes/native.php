@@ -45,23 +45,102 @@ add_action(
 );
 
 /**
- * Build the exact institution title mapping used by historical/native source adapters.
+ * Build exact public source names and unambiguous study-to-institution relationships.
  *
  * @return array Unique and ambiguous title mappings.
+ * @throws \RuntimeException When a catalog or relationship query fails.
  */
 function native_titles() {
-	$titles = array();
-	$ids    = get_posts(
+	global $wpdb;
+	$titles  = array();
+	$direct  = array();
+	$schools = array();
+	$blocked = array();
+	$courses = array();
+	$queries = $wpdb->num_queries;
+	$posts   = get_posts(
 		array(
-			'post_type'      => 'institutions',
-			'post_status'    => array( 'publish', 'draft' ),
-			'posts_per_page' => -1,
-			'fields'         => 'ids',
-			'no_found_rows'  => true,
+			'post_type'              => array( 'institutions', 'study', 'courses', 'course', 'routes', 'route', 'page' ),
+			'post_status'            => array( 'publish', 'draft' ),
+			'posts_per_page'         => -1,
+			'no_found_rows'          => true,
+			'update_post_term_cache' => false,
 		)
 	);
-	foreach ( $ids as $id ) {
-		$titles[ get_post_field( 'post_title', $id, 'raw' ) ][] = $id;
+	if ( $wpdb->num_queries > $queries && $wpdb->last_error ) {
+		throw new \RuntimeException( 'Source catalog could not be read.' );
+	}
+	foreach ( $posts as $post ) {
+		if ( 'institutions' !== $post->post_type ) {
+			continue;
+		}
+		$schools[ $post->ID ] = true;
+		$name                 = source_name( $post->post_title );
+		if ( '' !== $name ) {
+			$titles[ $name ][] = $post->ID;
+			$direct[ $name ][] = $post->ID;
+		}
+		// A saved public permalink identifies a former spelling without guessing articles or similar names.
+		$alias = source_name( str_replace( '-', ' ', rawurldecode( $post->post_name ) ) );
+		if ( preg_match( '/\p{L}/u', $alias ) && false === strpbrk( $alias, '/\\?#' ) ) {
+			$titles[ $alias ][] = $post->ID;
+		}
+	}
+	foreach ( $posts as $post ) {
+		$name = source_name( $post->post_title );
+		if ( '' === $name || 'institutions' === $post->post_type ) {
+			continue;
+		}
+		if ( in_array( $post->post_type, array( 'routes', 'route', 'page' ), true ) ) {
+			$blocked[ $name ] = true;
+			continue;
+		}
+		$keys    = 'study' === $post->post_type ? array( 'mosad' ) : array( 'institution_acf', 'institution' );
+		$parents = array();
+		$valid   = true;
+		foreach ( $keys as $key ) {
+			$queries = $wpdb->num_queries;
+			$values  = get_post_meta( $post->ID, $key, false );
+			if ( $wpdb->num_queries > $queries && $wpdb->last_error ) {
+				throw new \RuntimeException( 'Source relationship could not be read.' );
+			}
+			foreach ( $values as $value ) {
+				if ( '' === $value ) {
+					continue;
+				}
+				if ( ( ! is_string( $value ) && ! is_int( $value ) ) || ! preg_match( '/^[1-9]\d*$/D', (string) $value ) || ! isset( $schools[ (int) $value ] ) ) {
+					$valid = false;
+					continue;
+				}
+				$parents[] = (int) $value;
+			}
+		}
+		$parents            = array_values( array_unique( $parents ) );
+		$courses[ $name ][] = $valid && 1 === count( $parents ) ? $parents[0] : 0;
+	}
+	foreach ( $titles as &$ids ) {
+		$ids = array_values( array_unique( $ids ) );
+	}
+	unset( $ids );
+	foreach ( $direct as $name => $ids ) {
+		// Explicit institution names retain their authority over inferred aliases and course names.
+		$titles[ $name ] = array_values( array_unique( $ids ) );
+	}
+	foreach ( $blocked as $name => $unused ) {
+		if ( ! isset( $direct[ $name ] ) ) {
+			$titles[ $name ] = array();
+		}
+	}
+	foreach ( $courses as $name => $parents ) {
+		if ( isset( $direct[ $name ] ) || ctype_digit( (string) $name ) ) {
+			continue;
+		}
+		$parents = array_values( array_unique( $parents ) );
+		if ( isset( $blocked[ $name ] ) || in_array( 0, $parents, true ) || 1 !== count( $parents ) ) {
+			$titles[ $name ] = array();
+			continue;
+		}
+		$titles[ $name ] = array_values( array_unique( array_merge( $titles[ $name ] ?? array(), $parents ) ) );
 	}
 	return $titles;
 }

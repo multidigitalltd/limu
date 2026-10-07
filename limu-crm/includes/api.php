@@ -660,6 +660,7 @@ function summary( $request ) {
 		'received_leads'         => 0,
 		'institution_leads'      => 0,
 		'institution_historical' => 0,
+		'institution_live'       => 0,
 		'duplicates'             => 0,
 		'historical'             => 0,
 		'pending'                => 0,
@@ -710,6 +711,8 @@ function summary( $request ) {
 				++$out['institution_leads'];
 				if ( 'historical' === $d['state'] ) {
 					++$out['institution_historical'];
+				} else {
+					++$out['institution_live'];
 				}
 				$out['by_institution'][ $iid ] = ( $out['by_institution'][ $iid ] ?? 0 ) + 1;
 			}

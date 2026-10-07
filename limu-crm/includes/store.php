@@ -813,7 +813,7 @@ function rollback_caches() {
 		clean_user_cache( $id );
 		wp_cache_delete( $id, 'user_meta' );
 	}
-	foreach ( array( 'lcrm_settings', 'lcrm_icount_config', 'lcrm_icount_automatic', 'lcrm_icount_namespace' ) as $option ) {
+	foreach ( array( 'lcrm_settings', 'lcrm_mapping_repair', 'lcrm_icount_config', 'lcrm_icount_automatic', 'lcrm_icount_namespace' ) as $option ) {
 		wp_cache_delete( $option, 'options' );
 	}
 	wp_cache_delete( 'notoptions', 'options' );

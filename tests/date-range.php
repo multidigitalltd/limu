@@ -220,14 +220,14 @@ try {
     range_count_record( $range_a, '2060-06-04 10:00:00', $range_tag . ':count-pending', 'pending' );
     range_count_record( $range_a, '2060-06-05 10:00:00', $range_tag . ':count-sent', 'sent' );
     $count_summary = range_request( 'summary', $count_filter )->get_data();
-    range_check( 5 === $count_summary['received_leads'] && 4 === $count_summary['institution_leads'] && 3 === $count_summary['institution_historical'] && 6 === $count_summary['leads'] && 1 === $count_summary['unmapped'] && 1 === $count_summary['pending'], 'Unmapped and incomplete leads count for the site only; mapped live and historical deliveries count for recipients' );
+    range_check( 5 === $count_summary['received_leads'] && 4 === $count_summary['institution_leads'] && 3 === $count_summary['institution_historical'] && 1 === $count_summary['institution_live'] && 6 === $count_summary['leads'] && 1 === $count_summary['unmapped'] && 1 === $count_summary['pending'], 'Unmapped and incomplete leads count for the site only; mapped live and historical deliveries count for recipients' );
     range_check( array( $range_a => 3, $range_b => 1 ) === $count_summary['by_institution'] && 4 === array_sum( $count_summary['by_institution'] ) && ! isset( $count_summary['by_institution'][0] ), 'Institution chart totals match recipient counts and exclude unmapped and incomplete records' );
     $count_day = range_request( 'summary', array( 'date_from' => '2060-06-01', 'date_to' => '2060-06-01' ) )->get_data();
     range_check( 1 === $count_day['received_leads'] && 2 === $count_day['institution_leads'], 'A one-day range preserves source deduplication across recipients' );
     $count_institution = range_request( 'summary', array( 'institution' => $range_a, 'month' => '2060-06' ) )->get_data();
-    range_check( 4 === $count_institution['received_leads'] && 3 === $count_institution['institution_leads'] && 2 === $count_institution['institution_historical'], 'Institution and month filters scope both counters before source deduplication' );
+    range_check( 4 === $count_institution['received_leads'] && 3 === $count_institution['institution_leads'] && 2 === $count_institution['institution_historical'] && 1 === $count_institution['institution_live'], 'Institution and month filters scope both counters before source deduplication' );
     $count_empty = range_request( 'summary', array( 'year' => '2062' ) )->get_data();
-    range_check( 0 === $count_empty['received_leads'] && 0 === $count_empty['institution_leads'] && 0 === $count_empty['institution_historical'] && array() === $count_empty['by_institution'], 'An empty calendar year clears both counters and the institution chart' );
+    range_check( 0 === $count_empty['received_leads'] && 0 === $count_empty['institution_leads'] && 0 === $count_empty['institution_historical'] && 0 === $count_empty['institution_live'] && array() === $count_empty['by_institution'], 'An empty calendar year clears both counters and the institution chart' );
     range_check( ! isset( $count_summary['source'], $count_summary['contact'] ) && ! in_array( $count_shared['source'], $count_summary, true ), 'Summary responses contain numeric counts without original source or contact identities' );
 
     // The shared source spans both 500-row summary query pages.
@@ -264,7 +264,7 @@ try {
     update_user_meta( $range_user_id, '_lcrm_institutions', array( $range_a ) );
     wp_set_current_user( $range_user_id );
     $count_member = range_request( 'summary', $count_filter )->get_data();
-    range_check( 3 === $count_member['received_leads'] && 3 === $count_member['institution_leads'] && 2 === $count_member['institution_historical'] && array( $range_a => 3 ) === $count_member['by_institution'], 'Institution users count only their own completed deliveries and cannot infer unmapped or pending site submissions' );
+    range_check( 3 === $count_member['received_leads'] && 3 === $count_member['institution_leads'] && 2 === $count_member['institution_historical'] && 1 === $count_member['institution_live'] && array( $range_a => 3 ) === $count_member['by_institution'], 'Institution users count only their own completed deliveries and cannot infer unmapped or pending site submissions' );
     $count_member_day = range_request( 'summary', array( 'date_from' => '2060-06-01', 'date_to' => '2060-06-01' ) )->get_data();
     range_check( 1 === $count_member_day['received_leads'] && 1 === $count_member_day['institution_leads'] && 403 === range_request( 'summary', $count_filter + array( 'institution' => $range_b ) )->get_status(), 'Institution date ranges and explicit institution access preserve isolation for both counters' );
     update_user_meta( $range_user_id, '_lcrm_institutions', array( $range_a, $range_b ) );
@@ -272,7 +272,7 @@ try {
     range_check( 3 === $count_multi_member['received_leads'] && 4 === $count_multi_member['institution_leads'] && 3 === $count_multi_member['institution_historical'], 'A user assigned two institutions sees one source submission and both authorized recipient deliveries' );
     update_user_meta( $range_user_id, '_lcrm_institutions', array() );
     $count_unassigned = range_request( 'summary', $count_filter )->get_data();
-    range_check( 0 === $count_unassigned['received_leads'] && 0 === $count_unassigned['institution_leads'] && 0 === $count_unassigned['institution_historical'], 'An unassigned user receives zero for every new lead count' );
+    range_check( 0 === $count_unassigned['received_leads'] && 0 === $count_unassigned['institution_leads'] && 0 === $count_unassigned['institution_historical'] && 0 === $count_unassigned['institution_live'], 'An unassigned user receives zero for every new lead count' );
     wp_set_current_user( $range_admin->ID );
     foreach ( $range_bills as $range_bill ) {
         range_check( $range_bill === LimuCRM\data( $range_bill['id'] ), 'Split lead count reporting leaves approved billing snapshots unchanged: ' . $range_bill['month'] );

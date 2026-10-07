@@ -1,0 +1,2 @@
+One payment; balance changed once.
+PASS Concurrent requests returned one payment and changed the balance once.
