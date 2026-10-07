@@ -1,0 +1,21 @@
+PASS Dedicated CRM login loads
+PASS Accessibility login
+PASS Accessibility dashboard
+PASS Lead list shows captured and historical rows
+PASS Accessibility leads
+PASS Accessibility lead dialog
+PASS Dialog supports Escape
+PASS Accessibility bills
+PASS Accessibility institutions
+PASS Accessibility tariff dialog
+PASS Accessibility settings
+PASS Accessibility form mapping
+PASS Mobile page has no horizontal overflow
+PASS Accessibility mobile
+PASS Accessibility high contrast settings
+PASS Print report includes all matching bills
+PASS Hebrew PDF report renders
+PASS No browser JavaScript errors
+PASS Institution login hides manager navigation
+PASS Real cookie-authenticated institution cannot change settings
+20 browser and accessibility checks passed.

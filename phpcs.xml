@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<ruleset name="Limu CRM">
+ <description>WordPress coding standards for the namespaced CRM plugin.</description>
+ <file>limu-crm</file>
+ <arg name="extensions" value="php"/>
+ <rule ref="WordPress"/>
+ <rule ref="Generic.Formatting.DisallowMultipleStatements"/>
+ <rule ref="Squiz.WhiteSpace.ScopeClosingBrace"/>
+ <rule ref="WordPress.WP.Capabilities"><properties><property name="custom_capabilities" type="array"><element value="lcrm_view"/></property></properties></rule>
+</ruleset>

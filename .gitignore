@@ -1,0 +1,9 @@
+node_modules/
+.env
+.env.*
+*.log
+*.sql
+*.sql.gz
+*login*.json
+.phpcs-cache
+artifacts/*.pdf

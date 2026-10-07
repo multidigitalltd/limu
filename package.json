@@ -1,0 +1,15 @@
+{
+  "name": "limu-crm",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "esbuild limu-crm/assets/crm.js --minify --outfile=limu-crm/assets/crm.min.js && esbuild limu-crm/assets/access.js --minify --outfile=limu-crm/assets/access.min.js && esbuild limu-crm/assets/crm.css --minify --outfile=limu-crm/assets/crm.min.css",
+    "check:js": "node --check limu-crm/assets/crm.js && node --check limu-crm/assets/access.js",
+    "test:browser": "node tests/browser.cjs"
+  },
+  "devDependencies": {
+    "axe-core": "4.10.3",
+    "esbuild": "0.25.11",
+    "playwright": "1.62.1"
+  }
+}
