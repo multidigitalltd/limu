@@ -1,0 +1,7 @@
+PASS Login uses content-addressed CSS and privacy assets
+PASS Current portal bypasses a stale stable asset even when the cache ignores query versions
+PASS Current settings load through actual REST without the retired mapping UI or JavaScript errors
+PASS Actual manager bootstrap retains an empty legacy forms array for cached clients
+PASS Published 0.1.1 JavaScript renders settings against actual current REST without the undefined-length failure
+PASS Cached 0.1.1 client sends the compatible empty forms array and refreshes after its simulated save
+6 cache and settings compatibility browser checks passed.

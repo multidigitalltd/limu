@@ -18,8 +18,9 @@ const assert = require('node:assert/strict');
  const lead={id:91,name:hostile,institution:3,date:'2026-09-15 12:00:00',phone:hostile,email:hostile,form:hostile,duplicate_of:hostile,state:'historical',notes:[{at:'2026-09-15',text:hostile}],treatment:'new'};
  const pendingLead={...lead,id:93,name:'קליטה שלא הושלמה',state:'pending'};
  const bill={id:92,institution:3,month:'2026-09',state:'approved',total:1180,subtotal:1000,vat:180,paid:0,due:'2026-11-06',issued:'2026-10-07',duplicates:hostile,historical:hostile,lines:[{delivery:hostile,price:1000}]};
- let mode='normal',refreshFailure=false,pendingWrite=null,releaseWrite,writeStarted,lastSummaryQuery,lastReportQuery,lastExportQuery;
+ let mode='normal',refreshFailure=false,pendingWrite=null,releaseWrite,writeStarted,releaseReport,reportStarted,lastSummaryQuery,lastReportQuery,lastExportQuery;
  const writeStartedPromise=new Promise(resolve=>writeStarted=resolve);
+ const reportStartedPromise=new Promise(resolve=>reportStarted=resolve);
  const checks=[],errors=[];page.on('pageerror',error=>errors.push(error.message));
  async function check(condition,label){assert.ok(condition,label);checks.push(label);console.log('PASS',label);}
  const json=(route,body,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(body)});
@@ -39,7 +40,7 @@ const assert = require('node:assert/strict');
   if(endpoint==='bootstrap')return refreshFailure?json(route,{message:'כשל רשת מדומה'},503):json(route,bootstrap);
   if(endpoint==='summary'){lastSummaryQuery=url.searchParams;const scoped=url.searchParams.get('institution')==='2';return json(route,{leads:hostile,received_leads:scoped?6:4622,institution_leads:scoped?9:4008,institution_historical:scoped?1:hostile,confirmed:1,approved:1180,paid:0,overdue:0,draft:0,duplicates:0,pending:0,unmapped:3,historical:1,by_institution:{3:1}});}
   if(endpoint==='deliveries')return json(route,{items:[lead,pendingLead],total:2,pages:1});
-  if(endpoint==='report'&&url.searchParams.get('target')==='deliveries'){lastReportQuery=url.searchParams;return json(route,{items:[lead,pendingLead],total:2,pages:1});}
+  if(endpoint==='report'&&url.searchParams.get('target')==='deliveries'){lastReportQuery=url.searchParams;if(mode==='deferred-report'){const pendingReport=new Promise(resolve=>releaseReport=resolve);reportStarted();await pendingReport;}return json(route,{items:[lead,pendingLead],total:2,pages:1});}
   if(endpoint==='bills'||endpoint==='report'){if(endpoint==='report')lastReportQuery=url.searchParams;return json(route,{items:[bill],total:1,pages:1});}
   if(endpoint==='export'){lastExportQuery=url.searchParams;return json(route,{file:Buffer.from('Filtered export response fixture').toString('base64'),name:'filtered-fixture.xlsx',count:2});}
   if(endpoint==='audit')return json(route,{items:[{at:'2026-10-07',event:hostile,actor:hostile,target:hostile}],total:1,pages:1});
@@ -74,6 +75,13 @@ const assert = require('node:assert/strict');
  await page.locator('#filter-period').selectOption('year');await page.locator('#filter-year').fill('2026');await page.getByRole('button',{name:'הצגת נתונים'}).click();await page.waitForFunction(()=>document.getElementById('screen').getAttribute('aria-busy')==='false');
  await page.evaluate(()=>{window.print=()=>{};});await page.locator('#print-leads').click();await page.locator('#print-snapshot').waitFor({state:'attached'});
  await check(await page.evaluate(()=>!window.__limuXss)&&await page.locator('#print-snapshot img').count()===0&&(await page.locator('#print-snapshot').textContent()).includes('דוח לידים')&&await page.locator('#print-snapshot tbody tr').count()===2,'Lead PDF snapshot includes all matching records and escapes hostile contact data');await check(lastReportQuery.get('year')==='2026'&&!lastReportQuery.get('month')&&(await page.locator('#print-snapshot').textContent()).includes('שנת 2026'),'PDF lead report preserves the selected full year');await page.evaluate(()=>window.dispatchEvent(new Event('afterprint')));
+ mode='deferred-report';await page.locator('#filter-institution').selectOption('1');await page.getByRole('button',{name:'הצגת נתונים'}).click();await page.waitForFunction(()=>document.getElementById('screen').getAttribute('aria-busy')==='false');
+ await page.locator('#print-leads').click();await reportStartedPromise;assert.ok(releaseReport,'Deferred report request started');
+ await page.locator('#filter-period').selectOption('range');await page.locator('#filter-from').fill('2026-09-01');await page.locator('#filter-to').fill('2026-09-30');await page.locator('#filter-institution').selectOption('2');await page.getByRole('button',{name:'הצגת נתונים'}).click();await page.waitForFunction(()=>document.getElementById('screen').getAttribute('aria-busy')==='false');
+ releaseReport();await page.locator('#print-snapshot').waitFor({state:'attached'});
+ const delayedReportText=await page.locator('#print-snapshot').textContent();
+ await check(lastReportQuery.get('year')==='2026'&&lastReportQuery.get('institution')==='1'&&delayedReportText.includes('שנת 2026')&&delayedReportText.includes('מוסד הדגמה')&&!delayedReportText.includes('2026-09-01 – 2026-09-30')&&!delayedReportText.includes('מוסד עתידי'),'A delayed PDF report keeps the requested period and institution after the screen filters change');
+ await page.evaluate(()=>window.dispatchEvent(new Event('afterprint')));mode='normal';await page.locator('#filter-institution').selectOption('');
  await page.locator('#filter-period').selectOption('range');await page.locator('#filter-from').fill('2026-09-01');await page.locator('#filter-to').fill('2026-09-30');await page.getByRole('button',{name:'הצגת נתונים'}).click();await page.waitForFunction(()=>document.getElementById('screen').getAttribute('aria-busy')==='false');
  await page.locator('#print-leads').click();await page.locator('#print-snapshot').waitFor({state:'attached'});
  await check(lastReportQuery.get('date_from')==='2026-09-01'&&lastReportQuery.get('date_to')==='2026-09-30'&&!lastReportQuery.get('month')&&!lastReportQuery.get('year')&&(await page.locator('#print-snapshot').textContent()).includes('2026-09-01 – 2026-09-30'),'PDF lead report preserves both date-range boundaries without a month or year filter');await page.evaluate(()=>window.dispatchEvent(new Event('afterprint')));
@@ -109,5 +117,5 @@ const assert = require('node:assert/strict');
  await page.reload();await page.getByRole('heading',{name:'סקירה כללית',exact:true}).waitFor();await page.locator('#privacy-ack').click();
  await check(!(await page.locator('#privacy-notice').isVisible())&&errors.length===0,'Blocked browser storage does not prevent privacy dismissal or CRM loading');
  console.log(checks.length+' nonmutating frontend regression checks passed.');
- }finally{if(releaseWrite)releaseWrite();await browser.close();}
+ }finally{if(releaseWrite)releaseWrite();if(releaseReport)releaseReport();await browser.close();}
 })().catch(error=>{console.error(error.message);process.exit(1);});

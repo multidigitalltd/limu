@@ -60,6 +60,20 @@ const fs = require('node:fs');
   await check(await p.locator('[data-view="institutions"]').count()===0,'Institution login hides manager navigation');
   const memberSummary=await p.evaluate(async()=>{const r=await fetch(window.LimuCRM.api+'summary',{headers:{'X-WP-Nonce':window.LimuCRM.nonce}});if(!r.ok)throw new Error('Member summary fixture unavailable');return r.json();});
   await check((await p.locator('[data-metric="received"] .label').textContent()).startsWith('פניות מקור')&&(await p.locator('[data-metric="received"] .value').textContent())===String(memberSummary.received_leads)&&(await p.locator('[data-metric="leads"] .value').textContent())===String(memberSummary.institution_leads),'Institution dashboard identifies original submissions and shows only its authorized recipient scope');
+  const nonceFreeRead=await p.evaluate(async()=>{const r=await fetch(window.LimuCRM.api+'summary');return r.status;});
+  await check(nonceFreeRead===403,'Real cookie-authenticated reads without a REST nonce cannot expose CRM totals');
+  const foreignStatuses=await p.evaluate(async candidates=>{
+   const headers={'X-WP-Nonce':window.LimuCRM.nonce};
+   const bootstrapResponse=await fetch(window.LimuCRM.api+'bootstrap',{headers});
+   if(!bootstrapResponse.ok)throw new Error('Member bootstrap fixture unavailable');
+   const assigned=(await bootstrapResponse.json()).institutions.map(i=>Number(i.id));
+   const foreign=candidates.find(id=>id>0&&!assigned.includes(id));
+   if(!foreign)throw new Error('Missing unassigned institution security fixture');
+   return Promise.all(['summary','report?target=bills','export?target=deliveries'].map(async route=>{
+    const r=await fetch(window.LimuCRM.api+route+(route.includes('?')?'&':'?')+'institution='+foreign,{headers});return r.status;
+   }));
+  },Object.keys(allSummary.by_institution).map(Number));
+  await check(foreignStatuses.length===3&&foreignStatuses.every(status=>status===403),'Real institution cookies cannot read foreign totals, printable reports or Excel exports');
   const protectedResult=await p.evaluate(async()=>{const r=await fetch(window.LimuCRM.api+'settings',{method:'POST',headers:{'X-WP-Nonce':window.LimuCRM.nonce,'Content-Type':'application/json'},body:JSON.stringify({duplicate_mode:'rolling',start_date:''})});return r.status;});await check(protectedResult===403,'Real cookie-authenticated institution cannot change settings');await p.close();
  }
  console.log(`${checks.length} browser and accessibility checks passed.`);

@@ -78,7 +78,7 @@ function institution_list() {
 	$args = array(
 		'post_type'      => 'institutions',
 		'post_status'    => array( 'publish', 'draft' ),
-		'posts_per_page' => 100,
+		'posts_per_page' => -1,
 		'orderby'        => 'title',
 		'order'          => 'ASC',
 		'no_found_rows'  => true,
@@ -600,7 +600,7 @@ function export_xlsx( $target, $result ) {
 	foreach ( $rows as $i => $row ) {
 		$xml .= '<row r="' . ( $i + 1 ) . '">';
 		foreach ( $row as $j => $cell ) {
-			$xml .= '<c r="' . chr( 65 + $j ) . ( $i + 1 ) . '" t="inlineStr"><is><t xml:space="preserve">' . htmlspecialchars( (string) $cell, ENT_XML1 | ENT_QUOTES, 'UTF-8' ) . '</t></is></c>';
+			$xml .= '<c r="' . chr( 65 + $j ) . ( $i + 1 ) . '" t="inlineStr"><is><t xml:space="preserve">' . htmlspecialchars( (string) $cell, ENT_XML1 | ENT_QUOTES | ENT_DISALLOWED, 'UTF-8' ) . '</t></is></c>';
 		} $xml .= '</row>';
 	}
 	$xml .= '</sheetData></worksheet>';
@@ -673,7 +673,7 @@ function summary( $request ) {
 	);
 	$received = array();
 	for ( $page = 1, $pages = 1; $page <= $pages; ++$page ) {
-		$batch = query_records( 'lcrm_delivery', $filters, $page, 500 );
+		$batch = query_records( 'lcrm_delivery', $filters, $page, 500, '', false );
 		if ( 1 === $page ) {
 			$pages = $batch['pages'];
 		}
@@ -718,7 +718,7 @@ function summary( $request ) {
 	$out['received_leads'] = count( $received );
 	$today                 = current_time( 'Y-m-d' );
 	for ( $page = 1, $pages = 1; $page <= $pages; ++$page ) {
-		$batch = query_records( 'lcrm_bill', $filters, $page, 500 );
+		$batch = query_records( 'lcrm_bill', $filters, $page, 500, '', false );
 		if ( 1 === $page ) {
 			$pages = $batch['pages'];
 		}

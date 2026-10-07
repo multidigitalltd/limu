@@ -1,0 +1,62 @@
+PASS Settings saved
+PASS Institution tariff saved without a per-institution VAT field
+PASS Institution tariff saved without a per-institution VAT field
+PASS Israeli phone normalization
+PASS Money uses exact agorot
+PASS Empty contacts do not duplicate
+PASS Calendar and rolling windows differ
+PASS Rolling window expires at anniversary
+PASS Source replay is idempotent
+PASS Same general lead bills separately per institution
+PASS General lead contact details stored once across institutions
+PASS Phone alone matches duplicate
+PASS Email alone matches duplicate
+PASS Historical general lead resolves two institutions
+PASS Historical import repeatable without duplication
+PASS Billing excludes duplicates and unverified history
+PASS Each institution has its own tariff plus VAT
+PASS Bulk approval succeeds
+PASS Credit days count from actual issue date
+PASS Retrospective tariff edits blocked for approved month
+PASS Approved bill remains immutable
+PASS Payment replay does not double count
+PASS Overpayment is rejected
+PASS Partial and full manual payment totals correct
+PASS Institution sees only assigned institution
+PASS Direct institution ID tampering is forbidden
+PASS Institution cannot mutate via REST
+PASS Institution cannot access audit log
+PASS Institution response omits internal fields
+PASS Missing mutation nonce rejected
+PASS Real XLSX archive exported
+PASS Spreadsheet cells do not execute formulas
+PASS Failed mutation rolls back database and object cache
+PASS Existing site lead is captured automatically with its stored institution and no form mapping
+PASS Default dashboard includes imported historical deliveries across all months
+PASS Selecting a month narrows the all-period dashboard without losing historical rows
+PASS Reporting historical leads does not create or change any bill
+PASS Full-year summary includes every matching month and excludes other years
+PASS Full-year lead list combines year range and institution scope
+PASS Print reports and XLSX exports apply the same full-year institution filter
+PASS Automatically captured lead is visible to its institution without manual approval
+PASS All-period institution dashboard includes its historical rows and excludes every other institution
+PASS Full-year institution dashboard and reports preserve institution isolation
+PASS Manual lead-confirmation endpoint is absent
+PASS Manager can update treatment and internal notes
+PASS Internal notes never appear in institution payloads
+PASS Open calendar month cannot be billed early
+PASS Ambiguous historical name remains an exception
+PASS Scheduled monthly job is repeatable for approved bills
+PASS Payment and bill roll back together when snapshot update fails
+PASS Historical exception can be resolved to multiple institutions without billing
+PASS Malformed array input rejected without PHP warnings
+PASS Turnstile rejects missing token
+PASS Turnstile retains TLS verification
+PASS Turnstile accepts verified hostname and action (mocked provider)
+PASS Turnstile retains TLS verification
+PASS Turnstile rejects token for a different action
+PASS Invalid historical contact remains reportable and never becomes billable
+PASS Invalid existing lead remains a private nonbillable exception
+PASS Anonymous API access rejected
+
+60 integration assertions passed.

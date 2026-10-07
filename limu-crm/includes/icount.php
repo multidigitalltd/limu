@@ -364,6 +364,9 @@ function icount_reserve( $bill_id, $kind, $payment_id = 0, $details = array() ) 
 				if ( ! hash_equals( $operation['account'], icount_account() ) || $operation['payload']['client_id'] !== $client['id'] ) {
 					return error( 'קישור הלקוח או חשבון iCount השתנה מאז הפקת מסמך לחיוב. יש להחזיר את הקישור המקורי.', 409 );
 				}
+				if ( 'invoice' === $kind && 'deal' === $operation['doctype'] && 'issued' !== $operation['state'] ) {
+					return error( 'מצב דרישת תשלום קיימת אינו ודאי. יש לברר אותה לפני הפקת חשבונית מס.', 409 );
+				}
 				if ( in_array( $operation['doctype'], array( 'invoice', 'invrec' ), true ) ) {
 					if ( 'issued' !== $operation['state'] ) {
 						return error( 'מצב מסמך מס קיים אינו ודאי. יש לברר אותו לפני הפקה נוספת.', 409 );
@@ -394,6 +397,8 @@ function icount_reserve( $bill_id, $kind, $payment_id = 0, $details = array() ) 
 				}
 			} elseif ( 'invoice' === $kind && $tax ) {
 				return error( 'כבר קיים מסמך מס עבור החיוב.', 409 );
+			} elseif ( 'deal' === $kind && $tax && 'invrec' === $tax['doctype'] ) {
+				return error( 'כבר הופקה חשבונית מס/קבלה עבור מלוא התשלום. אין יתרה לדרישת תשלום חדשה.', 409 );
 			}
 			if ( ! in_array( $kind, $status['doctypes'], true ) || ! in_array( $kind, array( 'deal', 'invoice', 'invrec', 'receipt' ), true ) ) {
 				return error( 'סוג המסמך אינו זמין בחשבון iCount.', 409 );
@@ -438,9 +443,14 @@ function icount_reserve( $bill_id, $kind, $payment_id = 0, $details = array() ) 
 				$body['afterdiscount'] = icount_decimal( $subtotal );
 				$body['totalwithvat']  = icount_decimal( $bill['total'] );
 			}
-			$credit_anchor = 'invoice' === $kind && isset( $outbox['deal'] ) && 'issued' === $outbox['deal']['state'] ? $outbox['deal']['issued'] : $issued;
+			$credit_anchor = '';
+			if ( isset( $outbox['deal'] ) && 'issued' === $outbox['deal']['state'] ) {
+				$credit_anchor = ! empty( $outbox['deal']['credit_anchor'] ) ? $outbox['deal']['credit_anchor'] : $outbox['deal']['issued'];
+			} elseif ( $tax && 'invoice' === $tax['doctype'] ) {
+				$credit_anchor = ! empty( $tax['credit_anchor'] ) ? $tax['credit_anchor'] : $tax['issued'];
+			}
 			if ( in_array( $kind, array( 'deal', 'invoice' ), true ) ) {
-				$body['paydate'] = due_date( $credit_anchor, $bill['credit_days'] );
+				$body['paydate'] = due_date( $credit_anchor ? $credit_anchor : $issued, $bill['credit_days'] );
 			}
 			$base = 'receipt' === $kind ? $tax : ( $outbox['deal'] ?? null );
 			if ( $base && 'issued' === $base['state'] ) {
@@ -467,7 +477,7 @@ function icount_reserve( $bill_id, $kind, $payment_id = 0, $details = array() ) 
 				'total'         => $payment_id ? $payment['amount'] : $bill['total'],
 				'account'       => icount_account(),
 				'credit_days'   => $bill['credit_days'],
-				'credit_anchor' => 'invoice' === $kind && isset( $outbox['deal'] ) && 'issued' === $outbox['deal']['state'] ? $credit_anchor : '',
+				'credit_anchor' => in_array( $kind, array( 'deal', 'invoice' ), true ) ? $credit_anchor : '',
 				'payload'       => $body,
 				'docnum'        => 0,
 				'url'           => '',
@@ -666,10 +676,10 @@ function icount_send( $bill_id, $operation, $recover = false ) {
 			if ( is_wp_error( $outcome ) ) {
 				return $outcome;
 			}
-			if ( 'issued' === $state && 'deal' === $current['doctype'] ) {
+			if ( 'issued' === $state && in_array( $current['doctype'], array( 'deal', 'invoice' ), true ) ) {
 				$bill                   = data( $bill_id );
 				$bill['document_state'] = 'issued';
-				$bill['issued']         = $current['issued'];
+				$bill['issued']         = ! empty( $current['credit_anchor'] ) ? $current['credit_anchor'] : $current['issued'];
 				$bill['due']            = $current['paydate'];
 				$outcome                = save_record( 'lcrm_bill', $bill, $bill_id );
 				if ( is_wp_error( $outcome ) ) {

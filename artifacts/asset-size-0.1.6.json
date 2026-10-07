@@ -1,0 +1,26 @@
+{
+  "basis": "minified standalone CRM assets only; gzip simulated, not hosting configuration",
+  "assets": [
+    {
+      "asset": "crm.min.js",
+      "before_bytes": 73865,
+      "after_bytes": 73918,
+      "before_gzip_bytes": 15954,
+      "after_gzip_bytes": 15985
+    },
+    {
+      "asset": "crm.min.css",
+      "before_bytes": 26017,
+      "after_bytes": 24125,
+      "before_gzip_bytes": 6069,
+      "after_gzip_bytes": 5723
+    },
+    {
+      "asset": "privacy.min.js",
+      "before_bytes": 372,
+      "after_bytes": 372,
+      "before_gzip_bytes": 226,
+      "after_gzip_bytes": 226
+    }
+  ]
+}

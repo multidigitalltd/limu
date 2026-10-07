@@ -378,6 +378,59 @@ try {
     sec_check( 403 === sec_request( 'deliveries', null, array( 'institution' => $sec_a ) )->get_status(), 'Blank institution assignment cannot request another institution directly' );
     sec_check( 403 === sec_request( 'audit' )->get_status() && 403 === sec_request( 'treatment', array( 'id' => $sec_older['id'], 'treatment' => 'new' ) )->get_status(), 'Institution role cannot access audit records or mutate deliveries' );
     sec_check( ! current_user_can( 'read_post', $sec_older['id'] ) && ! current_user_can( 'edit_post', $sec_bill['id'] ), 'Native WordPress private-record capabilities also deny institution users' );
+
+    // The institution picker is complete even when there are more than 100 permitted recipients.
+    wp_set_current_user( $sec_admin->ID );
+    $sec_many_ids = array();
+    for ( $sec_index = 1; $sec_index <= 101; ++$sec_index ) {
+        $sec_many_id = wp_insert_post( array( 'post_type' => 'institutions', 'post_status' => 0 === $sec_index % 2 ? 'draft' : 'publish', 'post_title' => 'zzzz ' . $sec_tag . ' institution ' . sprintf( '%03d', $sec_index ) ), true );
+        if ( is_wp_error( $sec_many_id ) ) {
+            throw new RuntimeException( 'Unable to create institution-list fixture.' );
+        }
+        $sec_many_ids[] = $sec_many_id;
+    }
+    $sec_last_institution = end( $sec_many_ids );
+    $sec_last_title = get_post_field( 'post_title', $sec_last_institution, 'raw' );
+    $sec_last_agreement = array( 'credit_days' => 30, 'rates' => array( array( 'from' => $sec_month . '-01', 'price' => 1750, 'vat_bp' => 1800 ) ) );
+    update_post_meta( $sec_last_institution, '_lcrm_agreement', $sec_last_agreement );
+    $sec_trashed_institution = wp_insert_post( array( 'post_type' => 'institutions', 'post_status' => 'trash', 'post_title' => $sec_tag . ' trashed institution' ) );
+    $sec_many_bootstrap = sec_request( 'bootstrap' )->get_data();
+    $sec_many_entries = array_column( $sec_many_bootstrap['institutions'], null, 'id' );
+    sec_check( ! array_diff( $sec_many_ids, array_keys( $sec_many_entries ) ) && ! isset( $sec_many_entries[ $sec_trashed_institution ] ), 'Manager bootstrap includes every one of 101 published/draft institutions and excludes trash' );
+    sec_check( $sec_last_title === $sec_many_entries[ $sec_last_institution ]['name'] && $sec_last_agreement === $sec_many_entries[ $sec_last_institution ]['agreement'], 'An institution beyond the old 100-row limit retains its name and tariff for filtering and billing selection' );
+
+    // WordPress text sanitization retains interior XML-forbidden controls: export must replace them.
+    $sec_xml_name = sanitize_text_field( "XML fixture\x01text\x0B" );
+    $sec_xml_form = sanitize_text_field( "=SUM(A1:A2)\x02" );
+    $sec_xml_delivery = LimuCRM\locked( function () use ( $sec_last_institution, $sec_month, $sec_tag, $sec_xml_name, $sec_xml_form ) {
+        return LimuCRM\record_delivery( array( 'name' => $sec_xml_name, 'phone' => '0598876501', 'email' => '', 'date' => $sec_month . '-12 10:00:00', 'form' => $sec_xml_form ), $sec_last_institution, $sec_tag . ':xml-controls', true );
+    } );
+    sec_check( ! is_wp_error( $sec_xml_delivery ) && false !== strpos( $sec_xml_delivery['name'], "\x01" ), 'The XML regression uses a real stored contact containing a control that survives WordPress sanitization' );
+    $sec_xml_export = sec_request( 'export', null, array( 'target' => 'deliveries', 'institution' => $sec_last_institution ) );
+    $sec_xml_payload = $sec_xml_export->get_data();
+    if ( 200 !== $sec_xml_export->get_status() || empty( $sec_xml_payload['file'] ) ) {
+        throw new RuntimeException( 'Unable to export the isolated XML fixture.' );
+    }
+    $sec_export_path = tempnam( sys_get_temp_dir(), 'lcrm-security-' );
+    $sec_export_zip = new ZipArchive();
+    try {
+        file_put_contents( $sec_export_path, base64_decode( $sec_xml_payload['file'], true ) );
+        if ( true !== $sec_export_zip->open( $sec_export_path ) ) {
+            throw new RuntimeException( 'Unable to open the isolated XLSX archive.' );
+        }
+        $sec_sheet = $sec_export_zip->getFromName( 'xl/worksheets/sheet1.xml' );
+        sec_check( false !== strpos( $sec_sheet, $sec_last_title ), 'XLSX includes the institution name beyond the old 100-row institution limit' );
+        sec_check( false !== simplexml_load_string( $sec_sheet ) && false === strpos( $sec_sheet, "\x01" ) && false === strpos( $sec_sheet, "\x02" ) && false === strpos( $sec_sheet, "\x0B" ) && false !== strpos( $sec_sheet, '=SUM(A1:A2)' ) && false === strpos( $sec_sheet, '<f>' ), 'XML-forbidden controls are replaced while formula-like contact text remains a non-executable inline string in a valid worksheet' );
+    } finally {
+        $sec_export_zip->close();
+        unlink( $sec_export_path );
+    }
+    update_user_meta( $sec_user_id, '_lcrm_institutions', $sec_many_ids );
+    wp_set_current_user( $sec_user_id );
+    $sec_many_member = sec_request( 'bootstrap' )->get_data();
+    $sec_many_member_ids = array_column( $sec_many_member['institutions'], 'id' );
+    sec_check( 101 === count( $sec_many_member_ids ) && ! array_diff( $sec_many_ids, $sec_many_member_ids ) && ! in_array( $sec_a, $sec_many_member_ids, true ) && ! array_filter( $sec_many_member['institutions'], static fn( $item ) => isset( $item['agreement'] ) || isset( $item['icount_client'] ) ), 'A representative assigned to 101 institutions receives all its assignments without other institutions or manager-only tariff/client fields' );
+    sec_check( 403 === sec_request( 'export', null, array( 'target' => 'deliveries', 'institution' => $sec_a ) )->get_status() && 403 === sec_request( 'report', null, array( 'target' => 'bills', 'institution' => $sec_a ) )->get_status(), 'Complete institution lists preserve foreign-institution access denial for Excel and print reports' );
     wp_set_current_user( 0 );
     sec_check( 403 === sec_request( 'bootstrap' )->get_status(), 'Anonymous requests remain denied' );
     echo "\n$sec_passed security regression assertions passed.\n";

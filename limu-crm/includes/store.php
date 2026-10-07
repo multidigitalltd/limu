@@ -230,9 +230,10 @@ function audit( $event, $target, $extra = array() ) {
  * @param int    $page One-based page.
  * @param int    $limit Maximum row count.
  * @param string $search Sanitized name search.
- * @return array Items and total count.
+ * @param bool   $hydrate Include contact details; false is reserved for summary batches with totals on page one only.
+ * @return array Items and totals; raw summary batches after page one return zero totals and pages.
  */
-function query_records( $type, $filters = array(), $page = 1, $limit = 30, $search = '' ) {
+function query_records( $type, $filters = array(), $page = 1, $limit = 30, $search = '', $hydrate = true ) {
 	$meta = array( 'relation' => 'AND' );
 	if ( ! manager() ) {
 		$ids = allowed_institutions();
@@ -312,13 +313,21 @@ function query_records( $type, $filters = array(), $page = 1, $limit = 30, $sear
 			'meta_query'     => $meta,
 			'orderby'        => 'ID',
 			'order'          => 'DESC',
+			// Summary callers retain the first page's total; later batches do not need another count query.
+			'no_found_rows'  => ! $hydrate && $page > 1,
 		)
 	);
-	prime_contacts( wp_list_pluck( $q->posts, 'ID' ) );
+	if ( $hydrate ) {
+		prime_contacts( wp_list_pluck( $q->posts, 'ID' ) );
+	}
 	return array(
 		'items' => array_map(
-			function ( $post ) {
-				return data( $post->ID );
+			function ( $post ) use ( $hydrate ) {
+				if ( $hydrate ) {
+					return data( $post->ID );
+				}
+				$item = get_post_meta( $post->ID, '_lcrm_data', true );
+				return is_array( $item ) ? $item : array();
 			},
 			$q->posts
 		),

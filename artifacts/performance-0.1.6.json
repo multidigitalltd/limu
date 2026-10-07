@@ -1,0 +1,223 @@
+{
+  "fixture": {
+    "site_submissions": 4622,
+    "delivery_rows": 4770,
+    "mapped_deliveries": 4008,
+    "unmapped_submissions": 762,
+    "institutions": 40
+  },
+  "scope": "Synthetic disposable limu_test database only. REST callback elapsed after WordPress bootstrap; cold WordPress object cache versus warm within-request cache. Local MariaDB Unix socket. No live-site benchmark and no external accounting calls.",
+  "runtimes": {
+    "7.4.33": {
+      "cases": {
+        "manager_year_summary": {
+          "before": {
+            "cold_ms": 820.11,
+            "cold_queries": 56,
+            "cold_memory_mb": 45.89,
+            "cached_source_contact_meta": 4622,
+            "warm_median_ms": 203.36,
+            "warm_queries": 0,
+            "response_bytes": 654
+          },
+          "after": {
+            "cold_ms": 627.84,
+            "cold_queries": 26,
+            "cold_memory_mb": 24.81,
+            "cached_source_contact_meta": 0,
+            "warm_median_ms": 81.92,
+            "warm_queries": 0,
+            "response_bytes": 654
+          }
+        },
+        "manager_year_range_summary": {
+          "before": {
+            "cold_ms": 847.73,
+            "cold_queries": 53,
+            "cold_memory_mb": 44.41,
+            "cached_source_contact_meta": 4622,
+            "warm_median_ms": 250.58,
+            "warm_queries": 0,
+            "response_bytes": 654
+          },
+          "after": {
+            "cold_ms": 656.99,
+            "cold_queries": 23,
+            "cold_memory_mb": 23.34,
+            "cached_source_contact_meta": 0,
+            "warm_median_ms": 71.07,
+            "warm_queries": 0,
+            "response_bytes": 654
+          }
+        },
+        "manager_institution_summary": {
+          "before": {
+            "cold_ms": 66.11,
+            "cold_queries": 8,
+            "cold_memory_mb": 1.1,
+            "cached_source_contact_meta": 99,
+            "warm_median_ms": 9.9,
+            "warm_queries": 0,
+            "response_bytes": 226
+          },
+          "after": {
+            "cold_ms": 44.18,
+            "cold_queries": 5,
+            "cold_memory_mb": 0.57,
+            "cached_source_contact_meta": 0,
+            "warm_median_ms": 2.14,
+            "warm_queries": 0,
+            "response_bytes": 226
+          }
+        },
+        "manager_bootstrap": {
+          "before": {
+            "cold_ms": 5.97,
+            "cold_queries": 6,
+            "cold_memory_mb": 0.15,
+            "cached_source_contact_meta": 0,
+            "warm_median_ms": 2.23,
+            "warm_queries": 0,
+            "response_bytes": 4319
+          },
+          "after": {
+            "cold_ms": 6.09,
+            "cold_queries": 6,
+            "cold_memory_mb": 0.15,
+            "cached_source_contact_meta": 0,
+            "warm_median_ms": 2.32,
+            "warm_queries": 0,
+            "response_bytes": 4319
+          }
+        },
+        "member_three_institutions_summary": {
+          "before": {
+            "cold_ms": 152.87,
+            "cold_queries": 9,
+            "cold_memory_mb": 3.15,
+            "cached_source_contact_meta": 293,
+            "warm_median_ms": 27.09,
+            "warm_queries": 0,
+            "response_bytes": 253
+          },
+          "after": {
+            "cold_ms": 90.97,
+            "cold_queries": 6,
+            "cold_memory_mb": 1.55,
+            "cached_source_contact_meta": 0,
+            "warm_median_ms": 8.1,
+            "warm_queries": 0,
+            "response_bytes": 253
+          }
+        }
+      },
+      "all_outputs_equal": true
+    },
+    "8.4.26": {
+      "cases": {
+        "manager_year_summary": {
+          "before": {
+            "cold_ms": 1271.63,
+            "cold_queries": 56,
+            "cold_memory_mb": 35.56,
+            "cached_source_contact_meta": 4622,
+            "warm_median_ms": 313.52,
+            "warm_queries": 0,
+            "response_bytes": 654
+          },
+          "after": {
+            "cold_ms": 639.72,
+            "cold_queries": 26,
+            "cold_memory_mb": 19.51,
+            "cached_source_contact_meta": 0,
+            "warm_median_ms": 79.93,
+            "warm_queries": 0,
+            "response_bytes": 654
+          }
+        },
+        "manager_year_range_summary": {
+          "before": {
+            "cold_ms": 843.68,
+            "cold_queries": 53,
+            "cold_memory_mb": 34.21,
+            "cached_source_contact_meta": 4622,
+            "warm_median_ms": 194.14,
+            "warm_queries": 0,
+            "response_bytes": 654
+          },
+          "after": {
+            "cold_ms": 997.29,
+            "cold_queries": 23,
+            "cold_memory_mb": 18.16,
+            "cached_source_contact_meta": 0,
+            "warm_median_ms": 189.06,
+            "warm_queries": 0,
+            "response_bytes": 654
+          }
+        },
+        "manager_institution_summary": {
+          "before": {
+            "cold_ms": 62.5,
+            "cold_queries": 8,
+            "cold_memory_mb": 0.88,
+            "cached_source_contact_meta": 99,
+            "warm_median_ms": 5.95,
+            "warm_queries": 0,
+            "response_bytes": 226
+          },
+          "after": {
+            "cold_ms": 76.18,
+            "cold_queries": 5,
+            "cold_memory_mb": 0.45,
+            "cached_source_contact_meta": 0,
+            "warm_median_ms": 2.16,
+            "warm_queries": 0,
+            "response_bytes": 226
+          }
+        },
+        "manager_bootstrap": {
+          "before": {
+            "cold_ms": 6.87,
+            "cold_queries": 6,
+            "cold_memory_mb": 0.15,
+            "cached_source_contact_meta": 0,
+            "warm_median_ms": 2.02,
+            "warm_queries": 0,
+            "response_bytes": 4319
+          },
+          "after": {
+            "cold_ms": 4.98,
+            "cold_queries": 6,
+            "cold_memory_mb": 0.15,
+            "cached_source_contact_meta": 0,
+            "warm_median_ms": 1.09,
+            "warm_queries": 0,
+            "response_bytes": 4319
+          }
+        },
+        "member_three_institutions_summary": {
+          "before": {
+            "cold_ms": 93.55,
+            "cold_queries": 9,
+            "cold_memory_mb": 2.49,
+            "cached_source_contact_meta": 293,
+            "warm_median_ms": 11.67,
+            "warm_queries": 0,
+            "response_bytes": 253
+          },
+          "after": {
+            "cold_ms": 129.06,
+            "cold_queries": 6,
+            "cold_memory_mb": 1.22,
+            "cached_source_contact_meta": 0,
+            "warm_median_ms": 7.98,
+            "warm_queries": 0,
+            "response_bytes": 253
+          }
+        }
+      },
+      "all_outputs_equal": true
+    }
+  },
+  "fixture_manifest_removed": true
+}
