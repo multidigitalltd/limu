@@ -1,0 +1,35 @@
+PASS Portal omits the removed topbar wording
+PASS Dashboard distinguishes site submissions from institution recipient deliveries with an explanation of each count
+PASS Dashboard historical counters and institution names escape hostile HTML
+PASS Portal omits the removed toolbar, accessibility statement and credit
+PASS Missing-rate alert opens only institutions without a currently active tariff
+PASS Institution search refines the missing-rate list
+PASS Whole-year summary requests contain a year without a monthly constraint
+PASS Every dashboard metric title identifies the selected full year
+PASS Dashboard date-range request and label omit monthly and yearly constraints
+PASS Every dashboard metric title identifies both the selected date range and institution
+PASS Institution filtering updates both original-submission and recipient-delivery totals
+PASS Mobile portal retains a usable logout control
+PASS Incomplete legacy capture has no manual lead approval action
+PASS Lead fields, duplicate references and internal notes escape hostile HTML
+PASS Lead PDF snapshot includes all matching records and escapes hostile contact data
+PASS PDF lead report preserves the selected full year
+PASS PDF lead report preserves both date-range boundaries without a month or year filter
+PASS Excel download preserves both date-range boundaries without a month or year filter
+PASS Billing counters and line references escape hostile HTML
+PASS Audit event, actor and target escape hostile HTML
+PASS Print snapshot escapes hostile institution names and data
+PASS Current and scheduled future tariffs are shown separately
+PASS Tariff edit defaults to the rate effective today
+PASS Fixed VAT is displayed without an institution-level VAT input
+PASS A future-only tariff does not prefill an active rate
+PASS Successful save followed by refresh failure is reported as committed
+PASS Completion of an older save does not close a newer dialog
+PASS Expired authentication explains recovery instead of retrying a stale nonce
+PASS Current settings render when the bootstrap omits the retired forms property
+PASS Native capture requires no Elementor mapping in settings
+PASS Settings omit the removed manual import interface
+PASS Malformed privacy acknowledgment and old display settings leave a usable privacy notice
+PASS Privacy acknowledgment dismisses its notice
+PASS Blocked browser storage does not prevent privacy dismissal or CRM loading
+34 nonmutating frontend regression checks passed.

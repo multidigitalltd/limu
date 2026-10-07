@@ -70,13 +70,13 @@
 .lcrm .button.primary, .lcrm input[type=submit] { background: #174e44; color: #fff; border-color: #174e44; box-shadow: 0 3px 7px #174e4410; }
 .lcrm .button.primary:hover { background: #103e36; border-color: #103e36; }
 .lcrm .button svg { width: 16px; height: 16px; }
-.lcrm .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-block-end: 24px; }
+.lcrm .metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; margin-block-end: 24px; }
 .lcrm .metric { position: relative; background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 19px 20px 17px; box-shadow: 0 2px 6px #2b514203; overflow: hidden; }
 .lcrm .metric-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-block-end: 13px; }
 .lcrm .metric .label { font-size: 13px; color: #536e63; font-weight: 550; }
 .lcrm .metric .value { display: block; font-size: clamp(23px, 2.35vw, 35px); font-weight: 750; line-height: 1.35; font-variant-numeric: tabular-nums; letter-spacing: -1px; overflow-wrap: anywhere; }
 .lcrm .metric .hint { display: block; font-size: 12px; color: #607361; margin-block-start: 9px; }
-.lcrm .metric-icon { display: grid; place-items: center; width: 33px; height: 33px; border-radius: 9px; background: #f0f5ef; color: #4f7865; }
+.lcrm .metric-icon { flex-shrink: 0; display: grid; place-items: center; width: 33px; height: 33px; border-radius: 9px; background: #f0f5ef; color: #4f7865; }
 .lcrm .metric-icon svg { width: 18px; height: 18px; }
 .lcrm .metric-emphasis { background: #174e44; border-color: #174e44; color: #fff; }
 .lcrm .metric-emphasis .label, .lcrm .metric-emphasis .hint { color: #d1e4d9; }
@@ -247,7 +247,9 @@
   .lcrm nav button { font-size: 13px; gap: 9px; padding-inline: 10px; }
   .lcrm .workspace > main#main { padding: 28px 25px 40px; }
   .lcrm .topbar { padding-inline: 25px; }
-  .lcrm .metrics { gap: 12px; }
+  .lcrm .metrics { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+  .lcrm .metric { grid-column: span 2; }
+  .lcrm .metric:nth-child(-n+2) { grid-column: span 3; }
   .lcrm .metric { padding: 17px 15px; }
   .lcrm .metric .value { font-size: 27px; }
   .lcrm .institution-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -255,6 +257,8 @@
 }
 @media (max-width: 1020px) {
   .lcrm .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lcrm .metrics .metric { grid-column: span 1; }
+  .lcrm .metrics .metric:last-child { grid-column: 1 / -1; }
   .lcrm .grid-two, .lcrm .dashboard-grid { grid-template-columns: 1fr; gap: 0; }
   .lcrm .settings-layout { grid-template-columns: 1fr; }
   .lcrm .bar-row { grid-template-columns: 145px minmax(0, 1fr) 35px; }

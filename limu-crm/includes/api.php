@@ -655,19 +655,23 @@ function summary( $request ) {
 			return error( 'אין הרשאה למוסד.', 403 );
 		} $filters['institution'] = $iid;
 	}
-	$out = array(
-		'leads'          => 0,
-		'duplicates'     => 0,
-		'historical'     => 0,
-		'pending'        => 0,
-		'unmapped'       => 0,
-		'confirmed'      => 0,
-		'approved'       => 0,
-		'draft'          => 0,
-		'paid'           => 0,
-		'overdue'        => 0,
-		'by_institution' => array(),
+	$out      = array(
+		'leads'                  => 0,
+		'received_leads'         => 0,
+		'institution_leads'      => 0,
+		'institution_historical' => 0,
+		'duplicates'             => 0,
+		'historical'             => 0,
+		'pending'                => 0,
+		'unmapped'               => 0,
+		'confirmed'              => 0,
+		'approved'               => 0,
+		'draft'                  => 0,
+		'paid'                   => 0,
+		'overdue'                => 0,
+		'by_institution'         => array(),
 	);
+	$received = array();
 	for ( $page = 1, $pages = 1; $page <= $pages; ++$page ) {
 		$batch = query_records( 'lcrm_delivery', $filters, $page, 500 );
 		if ( 1 === $page ) {
@@ -675,6 +679,17 @@ function summary( $request ) {
 		}
 		foreach ( $batch['items'] as $d ) {
 			++$out['leads'];
+			// One original submission may have several recipients; contact details do not identify a submission.
+			$source  = $d['source'] ?? null;
+			$contact = $d['contact'] ?? null;
+			if ( is_string( $source ) && '' !== $source && strlen( $source ) <= 180 ) {
+				$key = 'source:' . $source;
+			} elseif ( ( is_int( $contact ) || is_string( $contact ) ) && preg_match( '/^[1-9]\d*$/D', (string) $contact ) ) {
+				$key = 'contact:' . $contact;
+			} else {
+				$key = 'delivery:' . $d['id'];
+			}
+			$received[ $key ] = true;
 			if ( $d['duplicate_of'] ) {
 				++$out['duplicates'];
 			}
@@ -690,11 +705,18 @@ function summary( $request ) {
 			if ( 'sent' === $d['state'] ) {
 				++$out['confirmed'];
 			}
-			$iid                           = $d['institution'];
-			$out['by_institution'][ $iid ] = ( $out['by_institution'][ $iid ] ?? 0 ) + 1;
+			$iid = absint( $d['institution'] );
+			if ( $iid && in_array( $d['state'], array( 'sent', 'historical' ), true ) ) {
+				++$out['institution_leads'];
+				if ( 'historical' === $d['state'] ) {
+					++$out['institution_historical'];
+				}
+				$out['by_institution'][ $iid ] = ( $out['by_institution'][ $iid ] ?? 0 ) + 1;
+			}
 		}
 	}
-	$today = current_time( 'Y-m-d' );
+	$out['received_leads'] = count( $received );
+	$today                 = current_time( 'Y-m-d' );
 	for ( $page = 1, $pages = 1; $page <= $pages; ++$page ) {
 		$batch = query_records( 'lcrm_bill', $filters, $page, 500 );
 		if ( 1 === $page ) {
