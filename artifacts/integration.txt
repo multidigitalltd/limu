@@ -1,6 +1,6 @@
 PASS Settings saved
-PASS Institution tariff saved
-PASS Institution tariff saved
+PASS Institution tariff saved without a per-institution VAT field
+PASS Institution tariff saved without a per-institution VAT field
 PASS Israeli phone normalization
 PASS Money uses exact agorot
 PASS Empty contacts do not duplicate
@@ -31,8 +31,16 @@ PASS Missing mutation nonce rejected
 PASS Real XLSX archive exported
 PASS Spreadsheet cells do not execute formulas
 PASS Failed mutation rolls back database and object cache
-PASS Elementor automatic capture uses configured recipients, not forged hidden recipient
+PASS Existing site lead is captured automatically with its stored institution and no form mapping
+PASS Default dashboard includes imported historical deliveries across all months
+PASS Selecting a month narrows the all-period dashboard without losing historical rows
+PASS Reporting historical leads does not create or change any bill
+PASS Full-year summary includes every matching month and excludes other years
+PASS Full-year lead list combines year range and institution scope
+PASS Print reports and XLSX exports apply the same full-year institution filter
 PASS Automatically captured lead is visible to its institution without manual approval
+PASS All-period institution dashboard includes its historical rows and excludes every other institution
+PASS Full-year institution dashboard and reports preserve institution isolation
 PASS Manual lead-confirmation endpoint is absent
 PASS Manager can update treatment and internal notes
 PASS Internal notes never appear in institution payloads
@@ -48,7 +56,7 @@ PASS Turnstile accepts verified hostname and action (mocked provider)
 PASS Turnstile retains TLS verification
 PASS Turnstile rejects token for a different action
 PASS Invalid historical contact remains reportable and never becomes billable
-PASS Failed Elementor capture reports an error and does not silently create a billable lead
+PASS Invalid existing lead remains a private nonbillable exception
 PASS Anonymous API access rejected
 
-52 integration assertions passed.
+60 integration assertions passed.

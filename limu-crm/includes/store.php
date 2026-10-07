@@ -12,6 +12,8 @@ namespace LimuCRM;
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
+/** Fixed VAT for every newly calculated bill, expressed in basis points. */
+const VAT_BP = 1800;
 /**
  * Determine whether the current user may manage the CRM.
  *
@@ -61,14 +63,14 @@ function error( $message, $status = 400 ) {
  * @return mixed Operation result.
  */
 function settings() {
+	$defaults = array(
+		'duplicate_mode' => 'calendar',
+		'automatic'      => false,
+		'start_date'     => '',
+	);
 	return wp_parse_args(
-		(array) get_option( 'lcrm_settings', array() ),
-		array(
-			'duplicate_mode' => 'calendar',
-			'automatic'      => false,
-			'start_date'     => '',
-			'forms'          => array(),
-		)
+		array_intersect_key( (array) get_option( 'lcrm_settings', array() ), $defaults ),
+		$defaults
 	);
 }
 /**
@@ -256,6 +258,14 @@ function query_records( $type, $filters = array(), $page = 1, $limit = 30, $sear
 	}
 	foreach ( $filters as $key => $value ) {
 		if ( '' !== $value && null !== $value ) {
+			if ( 'year' === $key ) {
+				$meta[] = array(
+					'key'     => '_lcrm_month',
+					'value'   => array( $value . '-01', $value . '-12' ),
+					'compare' => 'BETWEEN',
+				);
+				continue;
+			}
 			$meta[] = array(
 				'key'     => '_lcrm_' . $key,
 				'value'   => $value,
@@ -545,11 +555,11 @@ function prepare_bill( $id, $month ) {
 		if ( ! $rate ) {
 			return error( 'חסר תעריף תקף לחלק מהלידים.' );
 		}
-		$line_vat  = intdiv( $rate['price'] * $rate['vat_bp'] + 5000, 10000 );
+		$line_vat  = intdiv( $rate['price'] * VAT_BP + 5000, 10000 );
 		$lines[]   = array(
 			'delivery' => $item['id'],
 			'price'    => $rate['price'],
-			'vat_bp'   => $rate['vat_bp'],
+			'vat_bp'   => VAT_BP,
 			'vat'      => $line_vat,
 		);
 		$subtotal += $rate['price'];

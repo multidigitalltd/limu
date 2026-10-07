@@ -1,13 +1,13 @@
-# אימות גרסת 0.1.1
+# אימות גרסת 0.1.2
 
 נבדקה סביבת פיתוח מבודדת: PHP 7.4.33 ו־PHP 8.4.26, WordPress 7.1.3 (מקור WordPress הרשמי), MariaDB 11.8.6, Chromium, Playwright 1.62.1 ו־axe-core 4.10.3. הנתונים שנוצרו לבדיקות פונקציונליות ולצילומים הם נתוני דמה בלבד. הגיבוי המקורי לא הותקן כאתר חי ולא נשלחו לידים, מיילים או מסמכים.
 
 ## תוצאות
 
-- **52 assertions פונקציונליות עברו בכל אחת משתי סביבות PHP** על WordPress ומסד נתונים אמיתיים: כללי כפילות, חיוב לכל מוסד, היסטוריה לא לחיוב, הסכמים, אישור מרובה, תאריך פירעון, תשלומים, מניעת ניסיון חוזר, שגיאת שמירה ו־rollback, הרשאות, קלט פגום, מיפוי חריגים ו־XLSX.
-- **20 בדיקות דפדפן ונגישות עברו בכל אחת משתי סביבות PHP**: כניסה למנהל ולמוסד, מסכים, חלונות, Escape, נייד, ניגודיות גבוהה וחסימת כתיבה של מוסד דרך cookie-authenticated REST.
-- **55 בדיקות רגרסיה לאבטחה ולכספים**, **13 בדיקות הגנת התחברות** ו־**26 בדיקות קליטה אוטומטית** עברו בשתי הסביבות. יחד עם הבדיקה הפונקציונלית: **146 assertions לכל גרסת PHP**.
-- **15 בדיקות frontend נוספות** עברו מול שתי הסביבות עם תגובות API מדומות וכתיבות מדומות: פלט HTML זדוני, ללא אישור פניות ידני, PDF לידים, תעריפים עתידיים, שמירה/רענון, חלונות והתחברות שפגה.
+- **60 assertions פונקציונליות עברו בכל אחת משתי סביבות PHP** על WordPress ומסד נתונים אמיתיים: כללי כפילות, חיוב לכל מוסד, היסטוריה לא לחיוב, הסכמים, אישור מרובה, תאריך פירעון, תשלומים, מניעת ניסיון חוזר, שגיאת שמירה ו־rollback, הרשאות, קלט פגום, מיפוי חריגים ו־XLSX. נבדקו גם מע״מ 18% מול קלט מזויף, היסטוריה בדשבורד וסינון שנה בסיכומים/רשימות/ייצוא.
+- **32 בדיקות דפדפן ונגישות עברו בכל אחת משתי סביבות PHP**: כניסה למנהל ולמוסד, מסכים, חלונות, Escape, נייד, סינון שנה וכל התקופות, מקלדת ופריסה ב־200% zoom וחסימת כתיבה של מוסד דרך cookie-authenticated REST.
+- **72 בדיקות רגרסיה לאבטחה ולכספים**, **13 בדיקות הגנת התחברות** ו־**25 בדיקות קליטה אוטומטית** עברו בשתי הסביבות. יחד עם הבדיקה הפונקציונלית: **170 assertions לכל גרסת PHP**.
+- **24 בדיקות frontend נוספות** עברו מול שתי הסביבות עם תגובות API מדומות וכתיבות מדומות: פלט HTML זדוני, ללא אישור פניות ידני, PDF לידים, תעריפים עתידיים, שמירה/רענון, חלונות, סינון שנה, תעריפים חסרים, פרטיות באחסון חסום והתחברות שפגה.
 - **שתי בקשות תשלום מקבילות** בשתי סביבות PHP הוחזרו עם אותו מזהה: נוצר תשלום אחד והיתרה השתנתה פעם אחת בלבד.
 - WordPress Coding Standards עם כללי סגנון נוספים: **אפס שגיאות ואפס אזהרות** בריצה האחרונה. חריגים נקודתיים עם הסברים מפורשים מתועדים בקוד וב־README.
 - PHP lint לכל קובצי התוסף ובדיקת תחביר JS עברו. הנכסים המקומיים נבנו ומוקטנו באמצעות `npm ci` ו־`npm run build`.
@@ -30,10 +30,13 @@ LIMU_WP_ROOT=/workspace/.limu-tools/wordpress /workspace/.limu-tools/php74 tests
 LIMU_WP_ROOT=/workspace/.limu-tools/wordpress /workspace/.limu-tools/php74 tests/auth-security.php
 LIMU_WP_ROOT=/workspace/.limu-tools/wordpress /workspace/.limu-tools/php74 tests/native-capture.php
 LIMU_PHP=/workspace/.limu-tools/php74 LIMU_WP_ROOT=/workspace/.limu-tools/wordpress python3 tests/concurrency.py
-/workspace/.limu-tools/php /workspace/.limu-tools/member-login.php
+/workspace/.limu-tools/php74 /workspace/.limu-tools/member-login.php
 LIMU_TEST_URL=http://127.0.0.1:8091 LIMU_TEST_LOGIN=/workspace/.limu-tools/test-login.json LIMU_MEMBER_LOGIN=/workspace/.limu-tools/member-login.json LIMU_AXE_PATH=/workspace/limu/node_modules/axe-core/axe.min.js LIMU_SCREENSHOT_DIR=/workspace/limu/artifacts node tests/browser.cjs
+LIMU_TEST_URL=http://127.0.0.1:8091 LIMU_TEST_LOGIN=/workspace/.limu-tools/test-login.json node tests/frontend-review.cjs
 /workspace/.limu-tools/php74 /workspace/.limu-tools/phpcs/bin/phpcs --standard=phpcs.xml
 ```
+
+בדיקות שמשנות את מסד הנתונים רצות ברצף. גם בדיקות הדפדפן רצות ברצף בין גרסאות PHP: ההתחברות יוצרת WordPress session tokens באותה רשומת משתמש, ולכן הרצות מקבילות באותו חשבון עלולות לדרוס התחברות של הרצה אחרת.
 
 הבדיקה הפונקציונלית מוחקת את רשומות הדמה במסד `limu_test`. אין לשנות את ההגנה או להפנות אותה למסד הייצור. קובצי ההתחברות לבדיקות מוגנים בהרשאות 0600 ונמצאים מחוץ ל־Git; אין להעתיק או להדפיס את ערכיהם.
 
@@ -45,7 +48,7 @@ LIMU_TEST_URL=http://127.0.0.1:8091 LIMU_TEST_LOGIN=/workspace/.limu-tools/test-
 - iCount נדחה במפורש לשלב האחרון. אין מימוש API, דרישות חיצוניות, חשבוניות או קבלות בגרסה זו.
 - Turnstile נבדק עם תגובות ספק מדומות, כולל כשל טוקן/action ושמירת TLS. לא בוצעה בדיקה מול חשבון Cloudflare פעיל.
 - לא אומתו PageSpeed/Core Web Vitals באתר החי, תוספי הקאש, SMTP, כל גרסאות WordPress/PHP המינימליות, restore של גיבוי הייצור או restoration במשימת Codex חדשה.
-- לא בוצעו התקנה/פרסום באתר החי או פרסום snapshot של סביבת Codex. גרסת 0.1.0 הועלתה ל־GitHub; הקוד ואריזות 0.1.1 נכללים בעדכון המאגר של סקירה זו.
+- לא בוצעו התקנה/פרסום באתר החי או פרסום snapshot של סביבת Codex. גרסאות 0.1.0 ו־0.1.1 הועלו ל־GitHub; הקוד ואריזות 0.1.2 נכללים בעדכון המאגר של סקירה זו.
 
 ## אימות PHP 7.4.33
 

@@ -75,36 +75,3 @@ function turnstile_widget( $action, $field ) {
 	);
 	return '<div class="cf-turnstile" data-sitekey="' . esc_attr( $key ) . '" data-action="' . esc_attr( $action ) . '" data-response-field-name="' . esc_attr( $field ) . '"></div>';
 }
-
-add_shortcode(
-	'limu_crm_turnstile',
-	function () {
-		return turnstile_widget( 'crm_form', 'form_fields[lcrm_turnstile]' );
-	}
-);
-add_action(
-	'elementor_pro/forms/validation',
-	function ( $record, $handler ) {
-		if ( ! turnstile_site_key() ) {
-			return;
-		}
-		$id     = (string) $record->get_form_settings( 'id' );
-		$mapped = false;
-		foreach ( settings()['forms'] as $form ) {
-			if ( $form['id'] === $id ) {
-					$mapped = true;
-					break;
-			}
-		}
-		if ( ! $mapped ) {
-			return;
-		}
-	 // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Elementor owns form validation; this verifies its challenge token independently.
-		$token = isset( $_POST['form_fields']['lcrm_turnstile'] ) && is_string( $_POST['form_fields']['lcrm_turnstile'] ) ? sanitize_text_field( wp_unslash( $_POST['form_fields']['lcrm_turnstile'] ) ) : '';
-		if ( ! verify_turnstile( $token, 'crm_form' ) ) {
-			$handler->add_error_message( 'לא ניתן לאמת את הפנייה. יש לרענן ולנסות שוב.' );
-		}
-	},
-	10,
-	2
-);

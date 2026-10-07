@@ -2,7 +2,6 @@ PASS New stored shared lead is captured automatically for both exact institution
 PASS Live native lead requires no manual confirmation
 PASS Shared deliveries reference the existing contact without copying its data
 PASS Private delivery payload does not copy the native contact fields
-PASS Native source detection remains true after the queue flush
 PASS Retry reuses the stable native source delivery
 PASS Historical import source cannot duplicate or downgrade an already captured live lead
 PASS Draft source is not exposed as a live delivery
@@ -24,4 +23,4 @@ PASS AJAX observer reads the existing fName parameter correctly
 PASS Repeated HTTP observer callback is idempotent within the same request
 PASS Ambiguous CID mapping cannot disclose a contact to guessed institutions
 PASS Malformed public action selector is rejected safely
-OK 26 automatic native capture assertions
+OK 25 automatic native capture assertions

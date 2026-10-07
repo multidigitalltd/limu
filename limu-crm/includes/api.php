@@ -122,7 +122,7 @@ function public_item( $item ) {
  * @return mixed Operation result or validation error.
  */
 function read_api( $request ) {
-	foreach ( array( 'target', 'institution', 'month', 'state', 'page', 'search' ) as $key ) {
+	foreach ( array( 'target', 'institution', 'month', 'year', 'state', 'page', 'search' ) as $key ) {
 		$value = $request->get_param( $key );
 		if ( null !== $value && ! is_scalar( $value ) ) {
 			return error( 'פרמטר לא תקין.' );
@@ -131,6 +131,7 @@ function read_api( $request ) {
 			'target'      => 20,
 			'institution' => 10,
 			'month'       => 7,
+			'year'        => 4,
 			'state'       => 30,
 			'page'        => 7,
 			'search'      => 200,
@@ -144,6 +145,12 @@ function read_api( $request ) {
 		if ( 'month' === $key && null !== $value && '' !== $value && ! preg_match( '/^\d{4}-(0[1-9]|1[0-2])$/D', (string) $value ) ) {
 			return error( 'חודש לא תקין.' );
 		}
+		if ( 'year' === $key && null !== $value && '' !== $value && ( ! preg_match( '/^\d{4}$/D', (string) $value ) || (int) $value < 1900 ) ) {
+			return error( 'שנה לא תקינה.' );
+		}
+	}
+	if ( '' !== (string) ( $request->get_param( 'month' ) ?? '' ) && '' !== (string) ( $request->get_param( 'year' ) ?? '' ) ) {
+		return error( 'יש לבחור חודש או שנה, ולא את שניהם יחד.' );
 	}
 	$route = basename( $request->get_route() );
 	if ( 'bootstrap' === $route ) {
@@ -179,9 +186,9 @@ function read_api( $request ) {
 			return error( 'אין הרשאה למוסד.', 403 );
 		} $filters['institution'] = $id;
 	}
-	foreach ( array( 'month', 'state' ) as $key ) {
+	foreach ( array( 'month', 'year', 'state' ) as $key ) {
 		$v = $request->get_param( $key );
-		if ( is_string( $v ) && '' !== $v ) {
+		if ( null !== $v && '' !== $v ) {
 			$filters[ $key ] = sanitize_text_field( $v );
 		}
 	}
@@ -237,15 +244,13 @@ function write_api( $request ) {
 		if ( in_array( $key, array( 'institution', 'bill', 'id', 'after' ), true ) && ( ! is_scalar( $value ) || is_bool( $value ) || ! preg_match( '/^\d{1,10}$/D', (string) $value ) ) ) {
 			return error( 'מזהה לא תקין.' );
 		}
-		if ( in_array( $key, array( 'forms', 'institutions', 'ids' ), true ) ) {
+		if ( in_array( $key, array( 'institutions', 'ids' ), true ) ) {
 			if ( ! is_array( $value ) || count( $value ) > 100 ) {
 				return error( 'רשימת נתונים לא תקינה.' );
 			}
-			if ( 'forms' !== $key ) {
-				foreach ( $value as $member ) {
-					if ( ! is_scalar( $member ) || is_bool( $member ) || ! preg_match( '/^\d{1,10}$/D', (string) $member ) ) {
-						return error( 'מזהה לא תקין.' );
-					}
+			foreach ( $value as $member ) {
+				if ( ! is_scalar( $member ) || is_bool( $member ) || ! preg_match( '/^\d{1,10}$/D', (string) $member ) ) {
+					return error( 'מזהה לא תקין.' );
 				}
 			}
 		} elseif ( ! is_scalar( $value ) && null !== $value ) {
@@ -265,65 +270,10 @@ function write_api( $request ) {
 				return error( 'תאריך תחילת החיוב נעול לאחר אישור חיובים.', 409 );
 			}
 		}
-		$forms = $input['forms'] ?? array();
-		if ( ! is_array( $forms ) || count( $forms ) > 100 ) {
-			return error( 'מיפוי טפסים לא תקין.' );
-		}
-		$clean_forms = array();
-		$form_ids    = array();
-		foreach ( $forms as $form ) {
-			if ( ! is_array( $form ) ) {
-				return error( 'מיפוי טופס לא תקין.' );
-			}
-			foreach ( $form as $field => $value ) {
-				if ( 'institutions' !== $field && ! is_scalar( $value ) ) {
-					return error( 'שדה מיפוי לא תקין.' );
-				}
-			}
-			if ( ! isset( $form['institutions'] ) || ! is_array( $form['institutions'] ) || count( $form['institutions'] ) > 100 || array_filter(
-				$form['institutions'],
-				function ( $value ) {
-					return ! is_scalar( $value ) || is_bool( $value ) || ! preg_match( '/^\d{1,10}$/D', (string) $value );
-				}
-			) ) {
-				return error( 'מוסדות טופס לא תקינים.' );
-			}
-			if ( ! preg_match( '/^[a-zA-Z0-9_-]{1,60}$/D', (string) ( $form['id'] ?? '' ) ) || in_array( $form['id'], $form_ids, true ) ) {
-				return error( 'מזהה טופס לא תקין.' );
-			}
-			$form_ids[] = $form['id'];
-			$ids        = array_values( array_unique( array_map( 'absint', (array) ( $form['institutions'] ?? array() ) ) ) );
-			foreach ( $ids as $iid ) {
-				if ( 'institutions' !== get_post_type( $iid ) ) {
-						return error( 'מוסד לא תקין במיפוי טופס.' );
-				}
-			}
-			if ( ! $ids ) {
-				return error( 'נדרש לפחות מוסד אחד למיפוי טופס.' );
-			}
-			$fields = array();
-			foreach ( array( 'name', 'phone', 'email' ) as $key ) {
-				if ( strlen( (string) ( $form[ $key ] ?? '' ) ) > 60 ) {
-					return error( 'מזהה שדה ארוך מדי.' );
-				}
-					$fields[ $key ] = sanitize_key( $form[ $key ] ?? '' );
-			}
-			if ( ! $fields['phone'] && ! $fields['email'] ) {
-				return error( 'נדרש שדה טלפון או אימייל.' );
-			}
-			$clean_forms[] = array_merge(
-				array(
-					'id'           => $form['id'],
-					'institutions' => $ids,
-				),
-				$fields
-			);
-		}
 		$new = array(
 			'duplicate_mode' => $mode,
 			'automatic'      => ! empty( $input['automatic'] ),
 			'start_date'     => $start,
-			'forms'          => $clean_forms,
 		);
 		update_option( 'lcrm_settings', $new, false );
 		if ( get_option( 'lcrm_settings' ) !== $new ) {
@@ -346,9 +296,8 @@ function write_api( $request ) {
 		}
 		$from  = $input['from'] ?? '';
 		$price = money( $input['price'] ?? '' );
-		$vat   = money( $input['vat_percent'] ?? '' );
 		$days  = $input['credit_days'] ?? null;
-		if ( ! valid_date( $from ) || null === $price || null === $vat || $vat > 10000 || ! is_numeric( $days ) || ! preg_match( '/^\d{1,3}$/D', (string) $days ) || $days < 0 || $days > 365 ) {
+		if ( ! valid_date( $from ) || null === $price || ! is_numeric( $days ) || ! preg_match( '/^\d{1,3}$/D', (string) $days ) || $days < 0 || $days > 365 ) {
 			return error( 'תעריף, תאריך או ימי אשראי לא תקינים.' );
 		}
 		$config = agreement( $id ) ?? array(
@@ -391,7 +340,7 @@ function write_api( $request ) {
 		$config['rates'][]     = array(
 			'from'   => $from,
 			'price'  => $price,
-			'vat_bp' => $vat,
+			'vat_bp' => VAT_BP,
 		);
 		$config['credit_days'] = (int) $days;
 		usort(
@@ -411,7 +360,7 @@ function write_api( $request ) {
 			array(
 				'from'        => $from,
 				'price'       => $price,
-				'vat_bp'      => $vat,
+				'vat_bp'      => VAT_BP,
 				'credit_days' => (int) $days,
 			)
 		);
@@ -617,25 +566,31 @@ function export_xlsx( $target, $result ) {
  * @return mixed Operation result or validation error.
  */
 function summary( $request ) {
-	$month = sanitize_text_field( $request->get_param( 'month' ) ?? current_time( 'Y-m' ) );
-	if ( ! preg_match( '/^\d{4}-(0[1-9]|1[0-2])$/D', $month ) ) {
+	$month = sanitize_text_field( $request->get_param( 'month' ) ?? '' );
+	$year  = sanitize_text_field( $request->get_param( 'year' ) ?? '' );
+	if ( '' !== $month && ! preg_match( '/^\d{4}-(0[1-9]|1[0-2])$/D', $month ) ) {
 		return error( 'חודש לא תקין.' );
 	}
-	$filters = array( 'month' => $month );
-	$iid     = absint( $request->get_param( 'institution' ) );
+	if ( '' !== $year && ( ! preg_match( '/^\d{4}$/D', $year ) || (int) $year < 1900 ) ) {
+		return error( 'שנה לא תקינה.' );
+	}
+	if ( '' !== $month && '' !== $year ) {
+		return error( 'יש לבחור חודש או שנה, ולא את שניהם יחד.' );
+	}
+	$filters = '' === $month ? array() : array( 'month' => $month );
+	if ( '' !== $year ) {
+		$filters['year'] = $year;
+	}
+	$iid = absint( $request->get_param( 'institution' ) );
 	if ( $iid ) {
 		if ( ! owns( $iid ) ) {
 			return error( 'אין הרשאה למוסד.', 403 );
 		} $filters['institution'] = $iid;
 	}
-	$deliveries = query_records( 'lcrm_delivery', $filters, 1, 5000 );
-	$bills      = query_records( 'lcrm_bill', $filters, 1, 5000 );
-	if ( $deliveries['total'] > 5000 || $bills['total'] > 5000 ) {
-		return error( 'יש לצמצם את הדוח לפי מוסד.' );
-	}
 	$out = array(
-		'leads'          => $deliveries['total'],
+		'leads'          => 0,
 		'duplicates'     => 0,
+		'historical'     => 0,
 		'pending'        => 0,
 		'unmapped'       => 0,
 		'confirmed'      => 0,
@@ -645,28 +600,48 @@ function summary( $request ) {
 		'overdue'        => 0,
 		'by_institution' => array(),
 	);
-	foreach ( $deliveries['items'] as $d ) {
-		if ( $d['duplicate_of'] ) {
-			++$out['duplicates'];
-		} if ( 'pending' === $d['state'] ) {
-			++$out['pending'];
-		} if ( 'unmapped' === $d['state'] ) {
-			++$out['unmapped'];
-		} if ( 'sent' === $d['state'] ) {
-			++$out['confirmed'];
+	for ( $page = 1, $pages = 1; $page <= $pages; ++$page ) {
+		$batch = query_records( 'lcrm_delivery', $filters, $page, 500 );
+		if ( 1 === $page ) {
+			$pages = $batch['pages'];
 		}
-		$iid                           = $d['institution'];
-		$out['by_institution'][ $iid ] = ( $out['by_institution'][ $iid ] ?? 0 ) + 1;
-	}
-	foreach ( $bills['items'] as $b ) {
-		if ( 'approved' === $b['state'] ) {
-			$out['approved'] += $b['total'];
-			$out['paid']     += $b['paid'];
-			if ( $b['due'] < current_time( 'Y-m-d' ) ) {
-					$out['overdue'] += $b['total'] - $b['paid'];
+		foreach ( $batch['items'] as $d ) {
+			++$out['leads'];
+			if ( $d['duplicate_of'] ) {
+				++$out['duplicates'];
 			}
-		} else {
-			$out['draft'] += $b['total'];
+			if ( 'historical' === $d['state'] ) {
+				++$out['historical'];
+			}
+			if ( 'pending' === $d['state'] ) {
+				++$out['pending'];
+			}
+			if ( 'unmapped' === $d['state'] ) {
+				++$out['unmapped'];
+			}
+			if ( 'sent' === $d['state'] ) {
+				++$out['confirmed'];
+			}
+			$iid                           = $d['institution'];
+			$out['by_institution'][ $iid ] = ( $out['by_institution'][ $iid ] ?? 0 ) + 1;
+		}
+	}
+	$today = current_time( 'Y-m-d' );
+	for ( $page = 1, $pages = 1; $page <= $pages; ++$page ) {
+		$batch = query_records( 'lcrm_bill', $filters, $page, 500 );
+		if ( 1 === $page ) {
+			$pages = $batch['pages'];
+		}
+		foreach ( $batch['items'] as $b ) {
+			if ( 'approved' === $b['state'] ) {
+				$out['approved'] += $b['total'];
+				$out['paid']     += $b['paid'];
+				if ( $b['due'] < $today ) {
+					$out['overdue'] += $b['total'] - $b['paid'];
+				}
+			} else {
+				$out['draft'] += $b['total'];
+			}
 		}
 	}
 	return $out;

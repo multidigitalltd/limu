@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Limu CRM — Multi Digital
  * Description: פורטל מוסדות, לידים וחיובים חודשי עם בקרת הרשאות. חיבור iCount בשלב נפרד.
- * Version: 0.1.1
+ * Version: 0.1.2
  * Requires at least: 6.6
  * Requires PHP: 7.4.33
  * License: GPL-2.0-or-later
@@ -135,12 +135,12 @@ add_action(
 		header( 'X-Frame-Options: SAMEORIGIN' );
 		header( "Content-Security-Policy: frame-ancestors 'self'", false );
 		header( 'Referrer-Policy: no-referrer' );
-		wp_enqueue_style( 'limu-crm', plugins_url( 'assets/crm.min.css', LIMU_CRM_FILE ), array(), '0.1.1' );
+		wp_enqueue_style( 'limu-crm', plugins_url( 'assets/crm.min.css', LIMU_CRM_FILE ), array(), '0.1.2' );
 		wp_enqueue_script(
-			'limu-crm-access',
-			plugins_url( 'assets/access.min.js', LIMU_CRM_FILE ),
+			'limu-crm-privacy',
+			plugins_url( 'assets/privacy.min.js', LIMU_CRM_FILE ),
 			array(),
-			'0.1.1',
+			'0.1.2',
 			array(
 				'in_footer' => true,
 				'strategy'  => 'defer',
@@ -151,7 +151,7 @@ add_action(
 				'limu-crm',
 				plugins_url( 'assets/crm.min.js', LIMU_CRM_FILE ),
 				array(),
-				'0.1.1',
+				'0.1.2',
 				array(
 					'in_footer' => true,
 					'strategy'  => 'defer',

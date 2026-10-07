@@ -28,8 +28,7 @@ function native_collect( $id, $post, $update ) {
 		$GLOBALS['lcrm_native_new_leads'][ $id ] = true;
 	}
 	if ( 'publish' === $post->post_status && ! empty( $GLOBALS['lcrm_native_new_leads'][ $id ] ) ) {
-		$GLOBALS['lcrm_native_queue'][ $id ]           = true;
-		$GLOBALS['lcrm_native_published_leads'][ $id ] = true;
+		$GLOBALS['lcrm_native_queue'][ $id ] = true;
 	}
 }
 add_action( 'wp_after_insert_post', __NAMESPACE__ . '\\native_collect', 20, 3 );
@@ -38,22 +37,12 @@ add_action(
 	'transition_post_status',
 	function ( $new_status, $old_status, $post ) {
 		if ( 'publish' === $new_status && 'leads' === $post->post_type && ! empty( $GLOBALS['lcrm_native_new_leads'][ $post->ID ] ) ) {
-			$GLOBALS['lcrm_native_queue'][ $post->ID ]           = true;
-			$GLOBALS['lcrm_native_published_leads'][ $post->ID ] = true;
+			$GLOBALS['lcrm_native_queue'][ $post->ID ] = true;
 		}
 	},
 	20,
 	3
 );
-
-/**
- * Keep source detection available after flushing to prevent a second form capture.
- *
- * @return bool Whether this request created native leads.
- */
-function native_has_new_leads() {
-	return ! empty( $GLOBALS['lcrm_native_published_leads'] );
-}
 
 /**
  * Build the exact institution title mapping used by historical/native source adapters.

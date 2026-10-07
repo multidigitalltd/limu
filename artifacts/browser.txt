@@ -1,21 +1,33 @@
 PASS Dedicated CRM login loads
 PASS Accessibility login
+PASS Login omits removed accessibility controls, statement and footer credit
 PASS Accessibility dashboard
+PASS Initial dashboard includes historical leads across all periods
+PASS Authenticated portal omits removed controls, statement and credit
+PASS Month filter narrows the displayed lead total
+PASS Reset restores historical and live dashboard totals across all periods
+PASS Whole-year selection displays that year instead of adding a monthly constraint
+PASS A populated year displays its historical and live leads
+PASS Keyboard navigation selects the section and moves focus to its content
 PASS Lead list shows captured and historical rows
 PASS Accessibility leads
 PASS Accessibility lead dialog
-PASS Dialog supports Escape
+PASS Modal keeps keyboard focus inside the dialog
+PASS Escape closes the dialog and restores its trigger focus
 PASS Accessibility bills
 PASS Accessibility institutions
+PASS Institution tariff shows fixed 18 percent VAT without an editable VAT field
 PASS Accessibility tariff dialog
 PASS Accessibility settings
-PASS Accessibility form mapping
-PASS Mobile page has no horizontal overflow
+PASS Settings need no Elementor form mapping to receive native site leads
+PASS Portal reflows at a viewport equivalent to 200 percent zoom
+PASS Accessibility zoom-equivalent viewport
+PASS Mobile lead table scrolls within its container without page overflow
+PASS Mobile dashboard has no horizontal overflow and keeps logout available
 PASS Accessibility mobile
-PASS Accessibility high contrast settings
 PASS Print report includes all matching bills
 PASS Hebrew PDF report renders
 PASS No browser JavaScript errors
 PASS Institution login hides manager navigation
 PASS Real cookie-authenticated institution cannot change settings
-20 browser and accessibility checks passed.
+32 browser and accessibility checks passed.

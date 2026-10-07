@@ -47,7 +47,7 @@ try {
 	$month = ( new DateTimeImmutable( 'now', wp_timezone() ) )->modify( 'first day of last month' )->format( 'Y-m' );
 	$start = $month . '-01';
 	update_option( 'lcrm_live_capture_from', $start . ' 00:00:00', false );
-	update_option( 'lcrm_settings', array( 'duplicate_mode' => 'calendar', 'automatic' => false, 'start_date' => $start, 'forms' => array() ), false );
+	update_option( 'lcrm_settings', array( 'duplicate_mode' => 'calendar', 'automatic' => false, 'start_date' => $start ), false );
 	$prefix = 'native-' . wp_generate_uuid4();
 	$a = wp_insert_post( array( 'post_type' => 'institutions', 'post_status' => 'publish', 'post_title' => $prefix . ' א' ) );
 	$b = wp_insert_post( array( 'post_type' => 'institutions', 'post_status' => 'publish', 'post_title' => $prefix . ' ב' ) );
@@ -63,7 +63,6 @@ try {
 	native_check( 'sent' === $deliveries[0]['state'] && 'sent' === $deliveries[1]['state'], 'Live native lead requires no manual confirmation' );
 	native_check( $shared === $deliveries[0]['contact'] && $shared === $deliveries[1]['contact'], 'Shared deliveries reference the existing contact without copying its data' );
 	native_check( ! isset( get_post_meta( $deliveries[0]['id'], '_lcrm_data', true )['phone'] ), 'Private delivery payload does not copy the native contact fields' );
-	native_check( LimuCRM\native_has_new_leads(), 'Native source detection remains true after the queue flush' );
 	$retry = LimuCRM\locked( function () use ( $shared ) { return LimuCRM\native_capture( $shared ); } );
 	native_check( $retry[0]['id'] === $deliveries[0]['id'], 'Retry reuses the stable native source delivery' );
 	$import_retry = LimuCRM\locked( function () use ( $shared, $a, $month ) { return LimuCRM\record_delivery( array( 'name' => 'פונה לדוגמה בלבד', 'phone' => '0529876501', 'email' => '', 'form' => 'native-test', 'date' => $month . '-05 10:00:00', 'contact' => $shared, 'legacy_id' => $shared ), $a, 'legacy:' . $shared, true ); } );
@@ -77,7 +76,7 @@ try {
 	$historical = native_test_lead( $title_a, $old_date, '0529876502' );
 	$history = LimuCRM\native_flush()[ $historical ][0];
 	native_check( 'historical' === $history['state'] && ! $history['origin_live'], 'Newly observed backdated source stays historical and nonbillable' );
-	unset( $GLOBALS['lcrm_native_new_leads'], $GLOBALS['lcrm_native_queue'], $GLOBALS['lcrm_native_published_leads'] );
+	unset( $GLOBALS['lcrm_native_new_leads'], $GLOBALS['lcrm_native_queue'] );
 	wp_update_post( array( 'ID' => $historical, 'post_title' => 'עדכון נתון היסטורי בלבד' ) );
 	update_post_meta( $historical, 'phone', '0529876503' );
 	native_check( ! LimuCRM\native_flush() && 'historical' === LimuCRM\data( $history['id'] )['state'], 'Editing an existing historical lead never turns it into a live billed lead' );
@@ -129,7 +128,7 @@ try {
 } finally {
 	remove_filter( 'wp_doing_ajax', $ajax );
 	remove_action( 'wp_after_insert_post', $track, 99 );
-	unset( $GLOBALS['lcrm_native_new_leads'], $GLOBALS['lcrm_native_queue'], $GLOBALS['lcrm_native_published_leads'], $GLOBALS['lcrm_native_ajax_source'] );
+	unset( $GLOBALS['lcrm_native_new_leads'], $GLOBALS['lcrm_native_queue'], $GLOBALS['lcrm_native_ajax_source'] );
 	foreach ( array_reverse( array_unique( $created ) ) as $id ) {
 		wp_delete_post( $id, true );
 	}

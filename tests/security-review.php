@@ -20,6 +20,7 @@ $sec_original_settings = get_option( 'lcrm_settings', null );
 $sec_failure = null;
 $sec_fault = null;
 $sec_query_fault = null;
+$sec_large_posts = null;
 $sec_post_tracker = function ( $id, $post, $update ) {
     global $sec_posts;
     if ( ! $update ) {
@@ -57,7 +58,7 @@ function sec_institution( $title, $from ) {
     if ( is_wp_error( $id ) ) {
         throw new RuntimeException( 'Unable to create isolated security institution.' );
     }
-    $response = sec_request( 'agreement', array( 'institution' => $id, 'price' => '17.50', 'vat_percent' => '18', 'from' => $from, 'credit_days' => '30' ) );
+    $response = sec_request( 'agreement', array( 'institution' => $id, 'price' => '17.50', 'from' => $from, 'credit_days' => '30' ) );
     if ( 200 !== $response->get_status() ) {
         throw new RuntimeException( 'Unable to configure isolated security tariff.' );
     }
@@ -97,6 +98,50 @@ try {
     $sec_a = sec_institution( $sec_tag . ' chronology', $sec_month . '-01' );
     $sec_b = sec_institution( $sec_tag . ' frozen', $sec_month . '-01' );
     $sec_literal_institution = sec_institution( $sec_tag . ' literal values', $sec_month . '-01' );
+
+    $sec_vat_institution = sec_institution( $sec_tag . ' fixed VAT', $sec_month . '-01' );
+    $sec_vat_response = sec_request( 'agreement', array( 'institution' => $sec_vat_institution, 'price' => '17.50', 'vat_percent' => '99', 'from' => $sec_month . '-01', 'credit_days' => '30' ) );
+    sec_check( 200 === $sec_vat_response->get_status() && 1800 === $sec_vat_response->get_data()['rates'][0]['vat_bp'], 'A forged per-institution VAT value cannot change the server-wide 18 percent rate' );
+    $sec_vat_config = LimuCRM\agreement( $sec_vat_institution );
+    $sec_vat_config['rates'][0]['vat_bp'] = 1700;
+    update_post_meta( $sec_vat_institution, '_lcrm_agreement', $sec_vat_config );
+    $sec_vat_delivery = sec_delivery( $sec_vat_institution, $sec_month . '-03 10:00:00', $sec_tag . ':fixed-vat', '0598876001' );
+    $sec_vat_bill = LimuCRM\locked( function () use ( $sec_vat_institution, $sec_month ) { return LimuCRM\prepare_bill( $sec_vat_institution, $sec_month ); } );
+    sec_check( 1800 === $sec_vat_bill['lines'][0]['vat_bp'] && 315 === $sec_vat_bill['vat'] && 2065 === $sec_vat_bill['total'], 'Draft billing uses fixed 18 percent VAT even when old agreement metadata contains another rate' );
+    $sec_vat_approved = LimuCRM\locked( function () use ( $sec_vat_bill ) { return LimuCRM\approve_bill( $sec_vat_bill['id'] ); } );
+    $sec_vat_config['rates'][0]['vat_bp'] = 0;
+    update_post_meta( $sec_vat_institution, '_lcrm_agreement', $sec_vat_config );
+    $sec_vat_frozen = LimuCRM\locked( function () use ( $sec_vat_institution, $sec_month ) { return LimuCRM\prepare_bill( $sec_vat_institution, $sec_month ); } );
+    sec_check( ! is_wp_error( $sec_vat_approved ) && $sec_vat_approved === $sec_vat_frozen, 'Fixed VAT enforcement leaves approved historical bill snapshots immutable' );
+
+    // A homogeneous virtual history exercises pagination without writing thousands of disposable rows.
+    $sec_large_query = function ( $query ) use ( $sec_vat_institution ) {
+        if ( 'lcrm_delivery' !== $query->get( 'post_type' ) ) {
+            return false;
+        }
+        foreach ( (array) $query->get( 'meta_query' ) as $clause ) {
+            if ( is_array( $clause ) && '_lcrm_institution' === ( $clause['key'] ?? '' ) && $sec_vat_institution === ( $clause['value'] ?? null ) ) {
+                return true;
+            }
+        }
+        return false;
+    };
+    $sec_large_posts = function ( $posts, $query ) use ( $sec_large_query, $sec_vat_delivery ) {
+        if ( ! $sec_large_query( $query ) ) {
+            return $posts;
+        }
+        $size = max( 1, (int) $query->get( 'posts_per_page' ) );
+        $offset = ( max( 1, (int) $query->get( 'paged' ) ) - 1 ) * $size;
+        $query->found_posts = 5011;
+        $query->max_num_pages = (int) ceil( 5011 / $size );
+        return array_fill( 0, max( 0, min( $size, 5011 - $offset ) ), get_post( $sec_vat_delivery['id'] ) );
+    };
+    add_filter( 'posts_pre_query', $sec_large_posts, 10, 2 );
+    $sec_large_summary = sec_request( 'summary', null, array( 'institution' => $sec_vat_institution ) );
+    remove_filter( 'posts_pre_query', $sec_large_posts, 10 );
+    $sec_large_posts = null;
+    $sec_large_data = $sec_large_summary->get_data();
+    sec_check( 200 === $sec_large_summary->get_status() && 5011 === $sec_large_data['leads'] && 5011 === $sec_large_data['by_institution'][ $sec_vat_institution ] && 2065 === $sec_large_data['approved'], 'Dashboard totals include every row beyond the former 5000-row ceiling and retain scoped bill totals' );
 
     $sec_slash_name = 'Security C:\\samples\\literal';
     $sec_slash_note = 'Notes C:\\samples\\literal and \\another\\path';
@@ -192,8 +237,14 @@ try {
         sec_check( 1 === $sec_rows['total'] && ( $sec_unmapped ? 'unmapped' : 'historical' ) === $sec_rows['items'][0]['state'], 'Retried historical record remains nonbillable' );
     }
 
-    foreach ( array( 'institution', 'month', 'state', 'page', 'search' ) as $sec_param ) {
+    foreach ( array( 'institution', 'month', 'year', 'state', 'page', 'search' ) as $sec_param ) {
         sec_check( 400 === sec_request( 'deliveries', null, array( $sec_param => array( 'malformed' ) ) )->get_status(), 'Array query input rejected for ' . $sec_param );
+    }
+    foreach ( array( '99', '1899', '10000', '2026-01', 'abcd', true ) as $sec_year ) {
+        sec_check( 400 === sec_request( 'summary', null, array( 'year' => $sec_year ) )->get_status(), 'Malformed or out-of-range full-year input is rejected: ' . var_export( $sec_year, true ) );
+    }
+    foreach ( array( 'summary', 'deliveries', 'report', 'export' ) as $sec_route ) {
+        sec_check( 400 === sec_request( $sec_route, null, array( 'month' => $sec_month, 'year' => substr( $sec_month, 0, 4 ), 'target' => 'deliveries' ) )->get_status(), 'Ambiguous simultaneous month and year filters are rejected for ' . $sec_route );
     }
     sec_check( 400 === sec_request( 'deliveries', null, array( 'search' => str_repeat( 'x', 201 ) ) )->get_status(), 'Oversized search is rejected before database work' );
     sec_check( 400 === sec_request( 'treatment', array( 'id' => $sec_older['id'], 'treatment' => 'new', 'note' => str_repeat( 'x', 100000 ) ) )->get_status(), 'Oversized mutation input is rejected before persistence' );
@@ -260,6 +311,9 @@ try {
     $sec_empty_bootstrap = sec_request( 'bootstrap' )->get_data();
     $sec_empty_deliveries = sec_request( 'deliveries' )->get_data();
     sec_check( array() === $sec_empty_bootstrap['institutions'] && 0 === $sec_empty_deliveries['total'] && array() === $sec_empty_deliveries['items'], 'Institution role without assignments exposes no institution or contact data' );
+    $sec_empty_summary = sec_request( 'summary' )->get_data();
+    sec_check( 0 === $sec_empty_summary['leads'] && 0 === $sec_empty_summary['approved'] && array() === $sec_empty_summary['by_institution'], 'All-period dashboard exposes no totals to an unassigned institution account' );
+    sec_check( 403 === sec_request( 'summary', null, array( 'institution' => $sec_a ) )->get_status(), 'All-period dashboard rejects a forged institution filter' );
     sec_check( 403 === sec_request( 'deliveries', null, array( 'institution' => $sec_a ) )->get_status(), 'Blank institution assignment cannot request another institution directly' );
     sec_check( 403 === sec_request( 'audit' )->get_status() && 403 === sec_request( 'treatment', array( 'id' => $sec_older['id'], 'treatment' => 'new' ) )->get_status(), 'Institution role cannot access audit records or mutate deliveries' );
     sec_check( ! current_user_can( 'read_post', $sec_older['id'] ) && ! current_user_can( 'edit_post', $sec_bill['id'] ), 'Native WordPress private-record capabilities also deny institution users' );
@@ -270,6 +324,7 @@ try {
     $sec_failure = $exception;
     fwrite( STDERR, 'FAIL: ' . $exception->getMessage() . "\n" );
 } finally {
+    if ( $sec_large_posts ) { remove_filter( 'posts_pre_query', $sec_large_posts, 10 ); }
     if ( $sec_fault ) {
         remove_filter( 'update_post_metadata', $sec_fault, 10 );
     }

@@ -1,5 +1,9 @@
 PASS Boolean values cannot become monetary amounts
 PASS Decimal money accepts exact decimal strings and integer units only
+PASS A forged per-institution VAT value cannot change the server-wide 18 percent rate
+PASS Draft billing uses fixed 18 percent VAT even when old agreement metadata contains another rate
+PASS Fixed VAT enforcement leaves approved historical bill snapshots immutable
+PASS Dashboard totals include every row beyond the former 5000-row ceiling and retain scoped bill totals
 PASS Contact values and searchable titles preserve literal backslashes
 PASS Internal notes preserve literal backslashes without failed verification
 PASS Source key cannot silently change contact data for the same institution
@@ -33,9 +37,20 @@ PASS Historical batch retries safely from its unchanged cursor
 PASS Retried historical record remains nonbillable
 PASS Array query input rejected for institution
 PASS Array query input rejected for month
+PASS Array query input rejected for year
 PASS Array query input rejected for state
 PASS Array query input rejected for page
 PASS Array query input rejected for search
+PASS Malformed or out-of-range full-year input is rejected: '99'
+PASS Malformed or out-of-range full-year input is rejected: '1899'
+PASS Malformed or out-of-range full-year input is rejected: '10000'
+PASS Malformed or out-of-range full-year input is rejected: '2026-01'
+PASS Malformed or out-of-range full-year input is rejected: 'abcd'
+PASS Malformed or out-of-range full-year input is rejected: true
+PASS Ambiguous simultaneous month and year filters are rejected for summary
+PASS Ambiguous simultaneous month and year filters are rejected for deliveries
+PASS Ambiguous simultaneous month and year filters are rejected for report
+PASS Ambiguous simultaneous month and year filters are rejected for export
 PASS Oversized search is rejected before database work
 PASS Oversized mutation input is rejected before persistence
 PASS Manager mutation without a REST nonce is rejected
@@ -49,9 +64,11 @@ PASS Ordinary error rollback invalidates cached option changes
 PASS Nested transactions cannot bypass the mutation lock
 PASS Failed assignment transaction invalidates cached institution access
 PASS Institution role without assignments exposes no institution or contact data
+PASS All-period dashboard exposes no totals to an unassigned institution account
+PASS All-period dashboard rejects a forged institution filter
 PASS Blank institution assignment cannot request another institution directly
 PASS Institution role cannot access audit records or mutate deliveries
 PASS Native WordPress private-record capabilities also deny institution users
 PASS Anonymous requests remain denied
 
-55 security regression assertions passed.
+72 security regression assertions passed.

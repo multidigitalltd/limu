@@ -1,10 +1,10 @@
 {
   "name": "limu-crm",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "scripts": {
-    "build": "esbuild limu-crm/assets/crm.js --minify --outfile=limu-crm/assets/crm.min.js && esbuild limu-crm/assets/access.js --minify --outfile=limu-crm/assets/access.min.js && esbuild limu-crm/assets/crm.css --minify --outfile=limu-crm/assets/crm.min.css",
-    "check:js": "node --check limu-crm/assets/crm.js && node --check limu-crm/assets/access.js",
+    "build": "esbuild limu-crm/assets/crm.js --minify --outfile=limu-crm/assets/crm.min.js && esbuild limu-crm/assets/privacy.js --minify --outfile=limu-crm/assets/privacy.min.js && esbuild limu-crm/assets/crm.css --minify --outfile=limu-crm/assets/crm.min.css",
+    "check:js": "node --check limu-crm/assets/crm.js && node --check limu-crm/assets/privacy.js",
     "test:browser": "node tests/browser.cjs"
   },
   "devDependencies": {
