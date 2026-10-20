@@ -32,13 +32,14 @@ function native_test_lead( $institution, $date, $phone, $status = 'publish' ) {
 	return $id;
 }
 $track = function ( $id, $post, $update ) use ( &$created ) {
-	if ( ! $update && in_array( $post->post_type, array( 'institutions', 'leads', 'lcrm_contact', 'lcrm_delivery', 'lcrm_bill', 'lcrm_audit' ), true ) ) {
+	if ( ! $update && in_array( $post->post_type, array( 'institutions', 'leads', 'lcrm_contact', 'lcrm_delivery', 'lcrm_bill', 'lcrm_audit', 'lcrm_capture' ), true ) ) {
 		$created[] = $id;
 	}
 };
 add_action( 'wp_after_insert_post', $track, 99, 3 );
 $old_settings = get_option( 'lcrm_settings', null );
 $old_boundary = get_option( 'lcrm_live_capture_from', null );
+$old_timezone = get_option( 'timezone_string', null );
 $old_action = isset( $_REQUEST['action'] ) ? $_REQUEST['action'] : null;
 $ajax = function () { return true; };
 try {
@@ -130,14 +131,21 @@ try {
 	$url = 'https://ext.bhol.co.il/lead.php?' . http_build_query( $query );
 	native_check( null === LimuCRM\native_http_capture( $response, 'response', 'test', $args, str_replace( 'ext.bhol.co.il', 'invalid.example', $url ) ), 'Existing AJAX observer ignores an untrusted outbound hostname' );
 	native_check( null === LimuCRM\native_http_capture( array( 'response' => array( 'code' => 500 ) ), 'response', 'test', $args, $url ), 'Failed AJAX HTTP transport is not counted as a lead' );
+	$initial_offset = wp_timezone()->getOffset( new DateTimeImmutable( 'now', wp_timezone() ) );
 	$ajax_a = LimuCRM\native_http_capture( $response, 'response', 'test', $args, $url );
 	$query['cId'] = $prefix . '-cid-b';
+	update_option( 'timezone_string', 0 === $initial_offset ? 'Pacific/Kiritimati' : 'UTC' );
+	$shifted_time = current_time( 'mysql' );
 	$ajax_b = LimuCRM\native_http_capture( $response, 'response', 'test', $args, 'https://ext.bhol.co.il/lead.php?' . http_build_query( $query ) );
+	if ( null === $old_timezone ) { delete_option( 'timezone_string' ); } else { update_option( 'timezone_string', $old_timezone ); }
 	native_check( ! is_wp_error( $ajax_a ) && ! is_wp_error( $ajax_b ) && $ajax_a['contact'] === $ajax_b['contact'] && $a === $ajax_a['institution'] && $b === $ajax_b['institution'], 'Accepted existing AJAX request captures the same contact separately for server-resolved CID recipients' );
+	native_check( $shifted_time !== $ajax_a['date'] && $ajax_a['date'] === $ajax_b['date'] && $ajax_a['month'] === $ajax_b['month'], 'One accepted AJAX event freezes its original date and billing month across recipient callbacks even when the local clock changes' );
 	native_check( 'פונה AJAX לדוגמה בלבד' === $ajax_a['name'], 'AJAX observer reads the existing fName parameter correctly' );
 	$again = LimuCRM\native_http_capture( $response, 'response', 'test', $args, $url );
 	native_check( $again['id'] === $ajax_a['id'], 'Repeated HTTP observer callback is idempotent within the same request' );
 	update_post_meta( $b, 'cid', $prefix . '-cid-a' );
+	native_check( $ajax_a['id'] === LimuCRM\native_http_capture( $response, 'response', 'test', $args, $url )['id'], 'An accepted callback replay preserves its frozen recipient after CID configuration changes' );
+	unset( $GLOBALS['lcrm_native_ajax_source'], $GLOBALS['lcrm_native_ajax_date'], $GLOBALS['lcrm_native_ajax_results'], $GLOBALS['lcrm_native_ajax_queue'] );
 	native_check( null === LimuCRM\native_http_capture( $response, 'response', 'test', $args, $url ), 'Ambiguous CID mapping cannot disclose a contact to guessed institutions' );
 	$_REQUEST['action'] = array( 'institution_interested' );
 	native_check( null === LimuCRM\native_http_capture( $response, 'response', 'test', $args, $url ), 'Malformed public action selector is rejected safely' );
@@ -145,11 +153,12 @@ try {
 } finally {
 	remove_filter( 'wp_doing_ajax', $ajax );
 	remove_action( 'wp_after_insert_post', $track, 99 );
-	unset( $GLOBALS['lcrm_native_new_leads'], $GLOBALS['lcrm_native_queue'], $GLOBALS['lcrm_native_ajax_source'] );
+	unset( $GLOBALS['lcrm_native_new_leads'], $GLOBALS['lcrm_native_queue'], $GLOBALS['lcrm_native_markers'], $GLOBALS['lcrm_native_ajax_source'], $GLOBALS['lcrm_native_ajax_date'], $GLOBALS['lcrm_native_ajax_results'], $GLOBALS['lcrm_native_ajax_queue'] );
 	foreach ( array_reverse( array_unique( $created ) ) as $id ) {
 		wp_delete_post( $id, true );
 	}
 	if ( null === $old_settings ) { delete_option( 'lcrm_settings' ); } else { update_option( 'lcrm_settings', $old_settings, false ); }
 	if ( null === $old_boundary ) { delete_option( 'lcrm_live_capture_from' ); } else { update_option( 'lcrm_live_capture_from', $old_boundary, false ); }
+	if ( null === $old_timezone ) { delete_option( 'timezone_string' ); } else { update_option( 'timezone_string', $old_timezone ); }
 	if ( null === $old_action ) { unset( $_REQUEST['action'] ); } else { $_REQUEST['action'] = $old_action; }
 }

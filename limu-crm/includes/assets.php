@@ -13,6 +13,6 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 const ASSETS = array(
 	'crm.css'    => 'build/crm.1ab90859e552.min.css',
-	'crm.js'     => 'build/crm.fc1dc58a2410.min.js',
+	'crm.js'     => 'build/crm.66537e036511.min.js',
 	'privacy.js' => 'build/privacy.454062f33a47.min.js',
 );

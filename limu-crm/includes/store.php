@@ -174,16 +174,25 @@ function ensure_transactional_tables() {
  * All mutations share a database advisory lock, including parallel REST and cron workers.
  *
  * @param callable $callback Mutation executed under lock or savepoint.
+ * @param int      $wait_seconds Maximum lock wait; background retries use zero.
  * @return mixed Operation result or validation error.
  */
-function locked( $callback ) {
+function locked( $callback, $wait_seconds = 5 ) {
 	global $wpdb;
 	if ( isset( $GLOBALS['lcrm_changed_records'] ) ) {
 		return error( 'לא ניתן להתחיל פעולה מקבילה בתוך פעולה קיימת.', 409 );
 	}
-	$name = 'lcrm_' . md5( DB_NAME . ':' . $wpdb->prefix );
-	if ( '1' !== (string) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, %d)', $name, 5 ) ) ) {
-		return error( 'המערכת עסוקה. נסו שוב בעוד רגע.', 409 );
+	$name         = 'lcrm_' . md5( DB_NAME . ':' . $wpdb->prefix );
+	$wait_seconds = max( 0, min( 5, (int) $wait_seconds ) );
+	if ( '1' !== (string) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, %d)', $name, $wait_seconds ) ) ) {
+		$busy = error( 'המערכת עסוקה. נסו שוב בעוד רגע.', 409 );
+		$busy->add_data(
+			array(
+				'status'    => 409,
+				'lock_busy' => true,
+			)
+		);
+		return $busy;
 	}
 	$committed   = false;
 	$changed_ids = array();
@@ -569,6 +578,46 @@ function institution_deliveries( $id, $before = null, $after = null, $hydrate = 
 	return $items;
 }
 /**
+ * Find a unique private source record without WordPress query or object caches.
+ *
+ * @param string $type Private source record type.
+ * @param string $source Stable source idempotency key.
+ * @param int    $institution Recipient for delivery records; zero for contacts.
+ * @return array At most one matching record ID.
+ * @throws \RuntimeException When a lookup fails or the source is ambiguous.
+ */
+function source_record_ids( $type, $source, $institution = 0 ) {
+	global $wpdb;
+	if ( 'lcrm_delivery' === $type ) {
+		$sql = $wpdb->prepare(
+			"SELECT DISTINCT p.ID FROM {$wpdb->posts} p INNER JOIN {$wpdb->postmeta} s ON s.post_id = p.ID AND s.meta_key = %s AND s.meta_value = %s INNER JOIN {$wpdb->postmeta} i ON i.post_id = p.ID AND i.meta_key = %s AND CAST(i.meta_value AS SIGNED) = %d WHERE p.post_type = %s AND p.post_status = %s ORDER BY p.ID ASC LIMIT 2",
+			'_lcrm_source',
+			$source,
+			'_lcrm_institution',
+			$institution,
+			$type,
+			'private'
+		);
+	} elseif ( 'lcrm_contact' === $type ) {
+		$sql = $wpdb->prepare(
+			"SELECT DISTINCT p.ID FROM {$wpdb->posts} p INNER JOIN {$wpdb->postmeta} s ON s.post_id = p.ID AND s.meta_key = %s AND s.meta_value = %s WHERE p.post_type = %s AND p.post_status = %s ORDER BY p.ID ASC LIMIT 2",
+			'_lcrm_source',
+			$source,
+			$type,
+			'private'
+		);
+	} else {
+		throw new \RuntimeException( 'Invalid source record type.' );
+	}
+	$queries = $wpdb->num_queries;
+	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Both fixed query shapes are prepared immediately above.
+	$ids = $wpdb->get_col( $sql );
+	if ( $wpdb->num_queries <= $queries || $wpdb->last_error || ! is_array( $ids ) || count( $ids ) > 1 ) {
+		throw new \RuntimeException( 'Source record lookup failed or is ambiguous.' );
+	}
+	return array_map( 'intval', $ids );
+}
+/**
  * Record automatic source events against validated institutions.
  *
  * @param array       $lead Validated contact and delivery context.
@@ -577,6 +626,7 @@ function institution_deliveries( $id, $before = null, $after = null, $hydrate = 
  * @param bool        $historical Whether delivery evidence is unverified historical data.
  * @param string|null $saved_policy Immutable server-side policy for delayed remapping.
  * @return mixed Operation result or validation error.
+ * @throws \RuntimeException When existing source records cannot be verified.
  */
 function record_delivery( $lead, $institution, $source, $historical = false, $saved_policy = null ) {
 	if ( ! is_array( $lead ) || ! is_string( $source ) || '' === $source || strlen( $source ) > 180 || ! isset( $lead['date'] ) || ! is_string( $lead['date'] ) || ! valid_date( substr( $lead['date'], 0, 10 ) ) || ! preg_match( '/^\d{4}-\d{2}-\d{2} (?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/D', $lead['date'] ) ) {
@@ -592,31 +642,17 @@ function record_delivery( $lead, $institution, $source, $historical = false, $sa
 	}
 	$lead['phone_key'] = normalize_phone( $lead['phone'] ?? '' );
 	$lead['email_key'] = normalize_email( $lead['email'] ?? '' );
-	$existing          = get_posts(
-		array(
-			'post_type'      => 'lcrm_delivery',
-			'post_status'    => 'private',
-			'posts_per_page' => 1,
-			'fields'         => 'ids',
-			'meta_query'     => array(
-				array(
-					'key'   => '_lcrm_source',
-					'value' => $source,
-				),
-				array(
-					'key'   => '_lcrm_institution',
-					'value' => $institution,
-					'type'  => 'NUMERIC',
-				),
-			),
-		)
-	);
+	$existing          = source_record_ids( 'lcrm_delivery', $source, $institution );
 	if ( $existing ) {
-		$item = data( $existing[0] );
+		$item = raw_records( $existing )[0];
+		if ( ! isset( $item['source'], $item['institution'], $item['phone_key'], $item['email_key'] ) || $source !== $item['source'] || ( ! is_int( $item['institution'] ) && ! is_string( $item['institution'] ) ) || (string) $institution !== (string) $item['institution'] || ! is_string( $item['phone_key'] ) || ! is_string( $item['email_key'] ) || normalize_phone( $item['phone_key'] ) !== $item['phone_key'] || normalize_email( $item['email_key'] ) !== $item['email_key'] ) {
+			throw new \RuntimeException( 'Invalid delivery source snapshot.' );
+		}
 		if ( ! $historical && ( $item['phone_key'] !== $lead['phone_key'] || $item['email_key'] !== $lead['email_key'] ) ) {
 			return error( 'מזהה המסירה כבר קיים עם פרטי קשר אחרים.', 409 );
 		}
-		return $item;
+		// Hydrate display details only; committed financial fields always take precedence.
+		return array_merge( data( $existing[0] ), $item );
 	}
 	if ( ! $historical ) {
 		$existing_bill = bill_for( $institution, substr( $lead['date'], 0, 7 ) );
@@ -632,19 +668,18 @@ function record_delivery( $lead, $institution, $source, $historical = false, $sa
 		$contact_id = absint( $lead['legacy_id'] );
 	}
 	if ( ! $contact_id ) {
-		$contacts = get_posts(
-			array(
-				'post_type'      => 'lcrm_contact',
-				'post_status'    => 'private',
-				'fields'         => 'ids',
-				'posts_per_page' => 1,
-				'meta_key'       => '_lcrm_source',
-				'meta_value'     => $source,
-			)
-		);
+		$contacts = source_record_ids( 'lcrm_contact', $source );
 		if ( $contacts ) {
-			$contact_id           = $contacts[0];
-			$contact              = data( $contact_id );
+			$contact_id = $contacts[0];
+			$contact    = raw_records( $contacts )[0];
+			if ( ! isset( $contact['source'], $contact['name'], $contact['phone'], $contact['email'] ) || $source !== $contact['source'] ) {
+				throw new \RuntimeException( 'Invalid contact source snapshot.' );
+			}
+			foreach ( array( 'name', 'phone', 'email' ) as $field ) {
+				if ( ! is_string( $contact[ $field ] ) || strlen( $contact[ $field ] ) > 600 ) {
+					throw new \RuntimeException( 'Invalid contact source identity.' );
+				}
+			}
 			$contact['phone_key'] = normalize_phone( $contact['phone'] );
 			$contact['email_key'] = normalize_email( $contact['email'] );
 			if ( ! $historical && ( $lead['phone_key'] !== $contact['phone_key'] || $lead['email_key'] !== $contact['email_key'] ) ) {

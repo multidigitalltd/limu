@@ -3,7 +3,7 @@
  * Plugin Name: crm
  * Description: crm
  * Update URI: false
- * Version: 0.1.10
+ * Version: 0.1.11
  * Requires at least: 6.6
  * Requires PHP: 7.4.33
  * License: GPL-2.0-or-later
@@ -18,15 +18,17 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 define( 'LIMU_CRM_FILE', __FILE__ );
-define( 'LIMU_CRM_VERSION', '0.1.10' );
+define( 'LIMU_CRM_VERSION', '0.1.11' );
 require_once __DIR__ . '/includes/assets.php';
 require_once __DIR__ . '/includes/domain.php';
 require_once __DIR__ . '/includes/store.php';
+require_once __DIR__ . '/includes/agreements.php';
 require_once __DIR__ . '/includes/duplicate-index.php';
 require_once __DIR__ . '/includes/api.php';
 require_once __DIR__ . '/includes/read-cache.php';
 require_once __DIR__ . '/includes/capture.php';
 require_once __DIR__ . '/includes/native.php';
+require_once __DIR__ . '/includes/capture-retry.php';
 require_once __DIR__ . '/includes/mapping-repair.php';
 require_once __DIR__ . '/includes/security.php';
 require_once __DIR__ . '/includes/turnstile.php';
@@ -37,7 +39,7 @@ require_once __DIR__ . '/includes/icount-api.php';
 /** Register private records and the portal route without loading frontend assets globally. */
 function register() {
 	add_option( 'lcrm_live_capture_from', current_time( 'mysql' ), '', false );
-	foreach ( array( 'lcrm_contact', 'lcrm_delivery', 'lcrm_bill', 'lcrm_payment', 'lcrm_audit' ) as $type ) {
+	foreach ( array( 'lcrm_contact', 'lcrm_delivery', 'lcrm_bill', 'lcrm_payment', 'lcrm_audit', 'lcrm_capture' ) as $type ) {
 		register_post_type(
 			$type,
 			array(
@@ -89,6 +91,8 @@ register_deactivation_hook(
 		wp_unschedule_hook( 'lcrm_icount_demand' );
 		wp_clear_scheduled_hook( 'lcrm_mapping_repair' );
 		wp_clear_scheduled_hook( 'lcrm_duplicate_index_batch' );
+		wp_clear_scheduled_hook( 'lcrm_capture_retry_hourly' );
+		wp_clear_scheduled_hook( 'lcrm_capture_retry_batch' );
 		flush_rewrite_rules();
 	}
 );

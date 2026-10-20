@@ -26,6 +26,7 @@ function native_collect( $id, $post, $update ) {
 	}
 	if ( ! $update ) {
 		$GLOBALS['lcrm_native_new_leads'][ $id ] = true;
+		capture_retry_native_mark( $id, $post );
 	}
 	if ( 'publish' === $post->post_status && ! empty( $GLOBALS['lcrm_native_new_leads'][ $id ] ) ) {
 		$GLOBALS['lcrm_native_queue'][ $id ] = true;
@@ -36,7 +37,7 @@ add_action( 'wp_after_insert_post', __NAMESPACE__ . '\\native_collect', 20, 3 );
 add_action(
 	'transition_post_status',
 	function ( $new_status, $old_status, $post ) {
-		if ( 'publish' === $new_status && 'leads' === $post->post_type && ! empty( $GLOBALS['lcrm_native_new_leads'][ $post->ID ] ) ) {
+		if ( 'publish' === $new_status && 'leads' === $post->post_type && ( ! empty( $GLOBALS['lcrm_native_new_leads'][ $post->ID ] ) || is_array( capture_retry_native_read( $post->ID ) ) ) ) {
 			$GLOBALS['lcrm_native_queue'][ $post->ID ] = true;
 		}
 	},
@@ -189,11 +190,15 @@ function native_catalog_relationships( $posts ) {
 	$relationships = array();
 	foreach ( array_chunk( $ids, 500 ) as $batch ) {
 		$placeholders = implode( ',', array_fill( 0, count( $batch ), '%d' ) );
+		$queries      = $wpdb->num_queries;
 		$rows         = $wpdb->get_results( $wpdb->prepare( "SELECT post_id, meta_key, meta_value FROM {$wpdb->postmeta} WHERE post_id IN ($placeholders) AND meta_key IN (%s, %s, %s)", array_merge( $batch, array( 'mosad', 'institution_acf', 'institution' ) ) ), ARRAY_A ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Cached catalog read; all IN values are prepared, with a bounded generated placeholder list.
-		if ( ! is_array( $rows ) || $wpdb->last_error ) {
+		if ( $wpdb->num_queries <= $queries || ! is_array( $rows ) || $wpdb->last_error ) {
 			throw new \RuntimeException( 'Source relationship could not be read.' );
 		}
 		foreach ( $rows as $row ) {
+			if ( ! isset( $row['post_id'], $row['meta_key'], $row['meta_value'] ) || ! in_array( (int) $row['post_id'], $batch, true ) || ! in_array( $row['meta_key'], array( 'mosad', 'institution_acf', 'institution' ), true ) ) {
+				throw new \RuntimeException( 'Invalid source relationship.' );
+			}
 			$relationships[ (int) $row['post_id'] ][ $row['meta_key'] ][] = maybe_unserialize( $row['meta_value'] );
 		}
 	}
@@ -253,6 +258,7 @@ function native_catalog_build() {
 	$queries = $wpdb->num_queries;
 	$posts   = get_posts(
 		array(
+			'cache_results'          => false,
 			'post_type'              => NATIVE_CATALOG_TYPES,
 			'post_status'            => array( 'publish', 'draft' ),
 			'posts_per_page'         => -1,
@@ -261,7 +267,7 @@ function native_catalog_build() {
 			'update_post_meta_cache' => false,
 		)
 	);
-	if ( $wpdb->num_queries > $queries && $wpdb->last_error ) {
+	if ( $wpdb->num_queries <= $queries || $wpdb->last_error || ! is_array( $posts ) ) {
 		throw new \RuntimeException( 'Source catalog could not be read.' );
 	}
 	$relationships = native_catalog_relationships( $posts );
@@ -357,12 +363,25 @@ function native_report_error( $result, $institution, $source ) {
  * @return array|\WP_Error Result without copied contact records.
  */
 function native_capture( $id ) {
-	$post = get_post( $id );
-	if ( ! $post || 'leads' !== $post->post_type || 'publish' !== $post->post_status ) {
+	$post = capture_retry_source( $id );
+	if ( is_wp_error( $post ) ) {
+		return $post;
+	}
+	if ( ! $post || 'leads' !== $post['post_type'] || 'publish' !== $post['post_status'] ) {
 		return error( 'מקור פנייה לא תקין.' );
 	}
+	$marker = capture_retry_native_read( $id );
+	if ( is_wp_error( $marker ) ) {
+		return $marker;
+	}
+	if ( is_array( $marker ) && ( ! isset( $marker['snapshot'], $marker['destinations'] ) || ! empty( $marker['boundary_pending'] ) ) ) {
+		$marker = capture_retry_native_prepare( $id );
+		if ( is_wp_error( $marker ) ) {
+			return $marker;
+		}
+	}
 	$lead = array(
-		'date'      => $post->post_date,
+		'date'      => is_array( $marker ) ? $marker['date'] : $post['post_date'],
 		'contact'   => (int) $id,
 		'legacy_id' => (int) $id,
 	);
@@ -372,22 +391,25 @@ function native_capture( $id ) {
 		'email' => 'email',
 		'form'  => 'form-name',
 	) as $field => $meta ) {
-		$value          = get_post_meta( $id, $meta, true );
+		$value          = is_array( $marker ) ? $marker['snapshot'][ $field ] : get_post_meta( $id, $meta, true );
 		$lead[ $field ] = is_scalar( $value ) ? sanitize_text_field( substr( (string) $value, 0, 600 ) ) : '';
 	}
 	$lead['email']       = sanitize_email( $lead['email'] );
 	$boundary            = (string) get_option( 'lcrm_live_capture_from', '' );
-	$live                = '' !== $boundary && $post->post_date >= $boundary && ! empty( $GLOBALS['lcrm_native_new_leads'][ $id ] );
+	$live                = is_array( $marker ) ? $marker['live'] : ( '' !== $boundary && $post['post_date'] >= $boundary && ! empty( $GLOBALS['lcrm_native_new_leads'][ $id ] ) );
 	$lead['origin_live'] = $live;
 	$lead['phone_key']   = normalize_phone( $lead['phone'] );
 	$lead['email_key']   = normalize_email( $lead['email'] );
 	$lead['capture_via'] = 'native';
 	$source              = 'legacy:' . $id;
-	$value               = get_post_meta( $id, 'institution', true );
-	$destinations        = is_scalar( $value ) ? legacy_institutions( (string) $value, native_titles() ) : array();
+	$value               = is_array( $marker ) ? $marker['snapshot']['institution'] : get_post_meta( $id, 'institution', true );
+	$destinations        = is_array( $marker ) ? $marker['destinations'] : ( is_scalar( $value ) ? legacy_institutions( (string) $value, native_titles() ) : array() );
 	if ( ! $destinations || ( $live && ! $lead['phone_key'] && ! $lead['email_key'] ) ) {
-		$exists = get_posts(
+		global $wpdb;
+		$queries = $wpdb->num_queries;
+		$exists  = get_posts(
 			array(
+				'cache_results'  => false,
 				'post_type'      => 'lcrm_delivery',
 				'post_status'    => 'private',
 				'fields'         => 'ids',
@@ -396,13 +418,24 @@ function native_capture( $id ) {
 				'meta_value'     => $source,
 			)
 		);
+		if ( $wpdb->num_queries <= $queries || $wpdb->last_error ) {
+			return error( 'לא ניתן לקרוא את קליטת הפנייה הקיימת.', 503 );
+		}
 		if ( $exists ) {
-			return data( $exists[0] );
+			$result = raw_records( $exists )[0];
+			if ( is_array( $marker ) ) {
+				$result = capture_retry_delivery( $result['id'], $source, 0, $lead );
+				if ( is_wp_error( $result ) ) {
+					return $result;
+				}
+			}
+			$clear = is_array( $marker ) ? capture_retry_native_clear( $id ) : true;
+			return is_wp_error( $clear ) ? $clear : data( $result['id'] );
 		}
 		$lead['institution']   = 0;
 		$lead['source']        = $source;
 		$lead['state']         = 'unmapped';
-		$lead['month']         = substr( $post->post_date, 0, 7 );
+		$lead['month']         = substr( $lead['date'], 0, 7 );
 		$lead['duplicate_of']  = 0;
 		$lead['bill']          = 0;
 		$lead['treatment']     = 'new';
@@ -411,6 +444,16 @@ function native_capture( $id ) {
 		$result                = save_record( 'lcrm_delivery', $lead );
 		if ( ! is_wp_error( $result ) ) {
 			audit( 'native_capture_exception', $result['id'], array( 'reason' => $lead['capture_error'] ) );
+		}
+		if ( ! is_wp_error( $result ) && is_array( $marker ) ) {
+			$verified = capture_retry_delivery( $result['id'], $source, 0, $lead );
+			if ( is_wp_error( $verified ) ) {
+				return $verified;
+			}
+			$clear = capture_retry_native_clear( $id );
+			if ( is_wp_error( $clear ) ) {
+				return $clear;
+			}
 		}
 		return $result;
 	}
@@ -421,6 +464,7 @@ function native_capture( $id ) {
 			return $result;
 		}
 		// An overlapping import can store this newly observed source before its shutdown flush.
+		$result = raw_records( array( $result['id'] ) )[0];
 		if ( $live && 'historical' === $result['state'] ) {
 			$bill = bill_for( $institution, $result['month'] );
 			if ( $result['bill'] || ( $bill && 'approved' === $bill['state'] ) ) {
@@ -440,7 +484,19 @@ function native_capture( $id ) {
 				return $result;
 			}
 		}
-		$results[] = $result;
+		if ( is_array( $marker ) ) {
+			$verified = capture_retry_delivery( $result['id'], $source, $institution, $lead );
+			if ( is_wp_error( $verified ) || ( $live && ( 'sent' !== $verified['state'] || empty( $verified['origin_live'] ) ) ) ) {
+				return is_wp_error( $verified ) ? $verified : error( 'קליטת הפנייה החיה טרם אושרה.', 409 );
+			}
+		}
+		$results[] = data( $result['id'] );
+	}
+	if ( is_array( $marker ) ) {
+		$clear = capture_retry_native_clear( $id );
+		if ( is_wp_error( $clear ) ) {
+			return $clear;
+		}
 	}
 	return $results;
 }
@@ -451,26 +507,34 @@ function native_capture( $id ) {
  * @return array Per-source results for tests and internal integrations.
  */
 function native_flush() {
+	foreach ( array_keys( $GLOBALS['lcrm_native_markers'] ?? array() ) as $id ) {
+		$restored = capture_retry_native_restore( $id );
+		if ( is_wp_error( $restored ) ) {
+			native_report_error( $restored, 0, 'legacy:' . $id );
+		}
+	}
 	$ids                          = array_keys( $GLOBALS['lcrm_native_queue'] ?? array() );
 	$GLOBALS['lcrm_native_queue'] = array();
 	$results                      = array();
-	if ( $ids ) {
-		try {
-			native_titles();
-		} catch ( \Throwable $exception ) {
-			foreach ( $ids as $id ) {
-				$results[ $id ] = error( 'לא ניתן לקרוא את קטלוג המוסדות. יש לנסות שוב.', 503 );
-				native_report_error( $results[ $id ], 0, 'legacy:' . $id );
-			}
-			return $results;
+	$prepared                     = array();
+	foreach ( $ids as $id ) {
+		$result = capture_retry_native_freeze( $id );
+		if ( is_wp_error( $result ) ) {
+			$results[ $id ] = $result;
+			native_report_error( $result, 0, 'legacy:' . $id );
+		} else {
+			$prepared[] = $id;
 		}
 	}
-	foreach ( $ids as $id ) {
-		$result         = locked(
-			function () use ( $id ) {
-				return native_capture( $id );
-			}
-		);
+	foreach ( $prepared as $id ) {
+		$result = capture_retry_native_prepare( $id );
+		if ( ! is_wp_error( $result ) ) {
+			$result = locked(
+				static function () use ( $id ) {
+					return native_capture( $id );
+				}
+			);
+		}
 		$results[ $id ] = $result;
 		if ( is_wp_error( $result ) ) {
 			native_report_error( $result, 0, 'legacy:' . $id );
@@ -511,39 +575,37 @@ function native_http_capture( $response, $context, $transport, $args, $url ) {
 			return null;
 		}
 	}
-	$ids = get_posts(
-		array(
-			'post_type'      => 'institutions',
-			'post_status'    => array( 'publish', 'draft' ),
-			'fields'         => 'ids',
-			'posts_per_page' => 2,
-			'meta_key'       => 'cid',
-			'meta_value'     => sanitize_text_field( $query['cId'] ),
-		)
-	);
-	if ( 1 !== count( $ids ) || '' === trim( $query['cId'] ) ) {
+	$cid = sanitize_text_field( $query['cId'] );
+	if ( '' === trim( $cid ) ) {
 		return null;
 	}
 	if ( empty( $GLOBALS['lcrm_native_ajax_source'] ) ) {
 		$GLOBALS['lcrm_native_ajax_source'] = 'ajax:' . wp_generate_uuid4();
+		$GLOBALS['lcrm_native_ajax_date']   = current_time( 'mysql' );
 	}
 	$source = $GLOBALS['lcrm_native_ajax_source'];
-	$lead   = array(
-		'name'        => sanitize_text_field( $query['fName'] ),
-		'phone'       => sanitize_text_field( $query['phone'] ),
-		'email'       => sanitize_email( $query['email'] ),
-		'date'        => current_time( 'mysql' ),
-		'form'        => 'institution_interested',
-		'origin_live' => true,
-		'capture_via' => 'site_ajax',
+	$key    = hash( 'sha256', $source . ':' . $cid );
+	if ( isset( $GLOBALS['lcrm_native_ajax_results'][ $key ] ) ) {
+		return $GLOBALS['lcrm_native_ajax_results'][ $key ];
+	}
+	$lead = array(
+		'name'  => sanitize_text_field( $query['fName'] ),
+		'phone' => sanitize_text_field( $query['phone'] ),
+		'email' => sanitize_email( $query['email'] ),
+		'date'  => $GLOBALS['lcrm_native_ajax_date'],
+		'form'  => 'institution_interested',
 	);
-	$result = locked(
-		function () use ( $lead, $ids, $source ) {
-			return record_delivery( $lead, $ids[0], $source );
-		}
-	);
+	$id   = $GLOBALS['lcrm_native_ajax_queue'][ $key ] ?? capture_retry_ajax_enqueue( $lead, $cid, $source );
+	if ( is_wp_error( $id ) ) {
+		native_report_error( $id, 0, $source );
+		return $id;
+	}
+	$GLOBALS['lcrm_native_ajax_queue'][ $key ] = $id;
+	$result                                    = capture_retry_ajax_attempt( $id );
 	if ( is_wp_error( $result ) ) {
-		native_report_error( $result, $ids[0], $source );
+		native_report_error( $result, 0, $source );
+	} elseif ( null !== $result ) {
+		$GLOBALS['lcrm_native_ajax_results'][ $key ] = $result;
 	}
 	return $result;
 }
