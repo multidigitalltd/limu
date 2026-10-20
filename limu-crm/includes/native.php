@@ -363,6 +363,10 @@ function native_report_error( $result, $institution, $source ) {
  * @return array|\WP_Error Result without copied contact records.
  */
 function native_capture( $id ) {
+	$automatic = capture_case_auto( $id );
+	if ( is_wp_error( $automatic ) || ! $automatic ) {
+		return is_wp_error( $automatic ) ? $automatic : capture_retry_failure( 'manual_review', 'הפנייה ממתינה להחלטת מנהל.' );
+	}
 	$post = capture_retry_source( $id );
 	if ( is_wp_error( $post ) ) {
 		return $post;
@@ -468,7 +472,7 @@ function native_capture( $id ) {
 		if ( $live && 'historical' === $result['state'] ) {
 			$bill = bill_for( $institution, $result['month'] );
 			if ( $result['bill'] || ( $bill && 'approved' === $bill['state'] ) ) {
-				return error( 'התקופה כבר אושרה. נדרשת התאמה כספית נפרדת.', 409 );
+				return capture_retry_failure( 'approved_month', 'התקופה כבר אושרה. נדרשת התאמה כספית נפרדת.' );
 			}
 			$result['state']          = 'sent';
 			$result['origin_live']    = true;
@@ -487,7 +491,7 @@ function native_capture( $id ) {
 		if ( is_array( $marker ) ) {
 			$verified = capture_retry_delivery( $result['id'], $source, $institution, $lead );
 			if ( is_wp_error( $verified ) || ( $live && ( 'sent' !== $verified['state'] || empty( $verified['origin_live'] ) ) ) ) {
-				return is_wp_error( $verified ) ? $verified : error( 'קליטת הפנייה החיה טרם אושרה.', 409 );
+				return is_wp_error( $verified ) ? $verified : capture_retry_failure( 'invalid_payload', 'קליטת הפנייה החיה טרם אושרה.' );
 			}
 		}
 		$results[] = data( $result['id'] );
@@ -518,23 +522,24 @@ function native_flush() {
 	$results                      = array();
 	$prepared                     = array();
 	foreach ( $ids as $id ) {
+		$automatic = capture_case_auto( $id );
+		if ( is_wp_error( $automatic ) || ! $automatic ) {
+			if ( is_wp_error( $automatic ) ) {
+				capture_retry_schedule();
+			}
+			$results[ $id ] = is_wp_error( $automatic ) ? $automatic : capture_retry_failure( 'manual_review', 'הפנייה ממתינה להחלטת מנהל.' );
+			continue;
+		}
 		$result = capture_retry_native_freeze( $id );
 		if ( is_wp_error( $result ) ) {
-			$results[ $id ] = $result;
+			$results[ $id ] = capture_retry_result( $id, $result );
 			native_report_error( $result, 0, 'legacy:' . $id );
 		} else {
 			$prepared[] = $id;
 		}
 	}
 	foreach ( $prepared as $id ) {
-		$result = capture_retry_native_prepare( $id );
-		if ( ! is_wp_error( $result ) ) {
-			$result = locked(
-				static function () use ( $id ) {
-					return native_capture( $id );
-				}
-			);
-		}
+		$result         = capture_retry_native_attempt( $id, 0 );
 		$results[ $id ] = $result;
 		if ( is_wp_error( $result ) ) {
 			native_report_error( $result, 0, 'legacy:' . $id );

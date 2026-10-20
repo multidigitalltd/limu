@@ -16,6 +16,53 @@ const CAPTURE_RETRY_VERSION = 1;
 const CAPTURE_RETRY_BATCH   = 25;
 
 /**
+ * Add a stable machine-readable reason without exposing private source data.
+ *
+ * @param string $reason Capture failure category.
+ * @param string $message Safe user-facing message.
+ * @param int    $status HTTP status.
+ * @return \WP_Error
+ */
+function capture_retry_failure( $reason, $message, $status = 409 ) {
+	$failure = error( $message, $status );
+	$failure->add_data(
+		array(
+			'status'         => $status,
+			'capture_reason' => $reason,
+		)
+	);
+	return $failure;
+}
+
+/**
+ * Retry transient foreground failures shortly without delaying the visitor.
+ *
+ * @return void
+ */
+function capture_retry_schedule() {
+	if ( ! wp_doing_cron() && ! wp_next_scheduled( 'lcrm_capture_retry_soon' ) ) {
+		wp_schedule_single_event( time() + 2 * MINUTE_IN_SECONDS, 'lcrm_capture_retry_soon' );
+	}
+}
+
+/**
+ * Record a failed attempt only after its financial transaction has ended.
+ *
+ * @param int   $id Native source or AJAX inbox ID.
+ * @param mixed $result Capture result.
+ * @return mixed Unchanged capture result.
+ */
+function capture_retry_result( $id, $result ) {
+	if ( is_wp_error( $result ) ) {
+		$case = capture_case_note( $id, $result );
+		if ( ! wp_doing_cron() && ( is_wp_error( $case ) || ( is_array( $case ) && 'retry' === $case['state'] ) ) ) {
+			capture_retry_schedule();
+		}
+	}
+	return $result;
+}
+
+/**
  * Read the activation boundary without an options-cache fallback.
  *
  * @return string|\WP_Error
@@ -55,7 +102,7 @@ function capture_retry_source( $id ) {
 function capture_retry_delivery( $id, $source, $institution, $lead ) {
 	$item = raw_records( array( $id ) )[0];
 	if ( ! isset( $item['source'], $item['institution'], $item['date'], $item['phone_key'], $item['email_key'], $item['state'] ) || $source !== $item['source'] || (string) $institution !== (string) $item['institution'] || $lead['date'] !== $item['date'] || normalize_phone( $lead['phone'] ) !== $item['phone_key'] || normalize_email( $lead['email'] ) !== $item['email_key'] || ! in_array( $item['state'], $institution ? array( 'sent', 'historical' ) : array( 'unmapped' ), true ) ) {
-		return error( 'לא ניתן לאמת את קליטת הפנייה.', 409 );
+		return capture_retry_failure( 'identity_conflict', 'לא ניתן לאמת את קליטת הפנייה.' );
 	}
 	return $item;
 }
@@ -120,7 +167,7 @@ function capture_retry_native_read( $id ) {
 		return null;
 	}
 	$marker = maybe_unserialize( $rows[0]['meta_value'] );
-	return capture_retry_native_valid( $marker ) ? $marker : error( 'סימון הפנייה הממתינה אינו תקין.', 409 );
+	return capture_retry_native_valid( $marker ) ? $marker : capture_retry_failure( 'invalid_payload', 'סימון הפנייה הממתינה אינו תקין.' );
 }
 
 /**
@@ -134,7 +181,7 @@ function capture_retry_native_read( $id ) {
 function capture_retry_native_write( $id, $marker, $expected = null ) {
 	global $wpdb;
 	if ( ! capture_retry_native_valid( $marker ) ) {
-		return error( 'סימון הפנייה הממתינה אינו תקין.', 409 );
+		return capture_retry_failure( 'invalid_payload', 'סימון הפנייה הממתינה אינו תקין.' );
 	}
 	$queries = $wpdb->num_queries;
 	$ids     = $wpdb->get_col( $wpdb->prepare( "SELECT meta_id FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s", $id, '_lcrm_capture_pending' ) );
@@ -348,14 +395,7 @@ function capture_retry_native_clear( $id ) {
 		return error( 'קליטת הפנייה מחייבת שמירה משותפת.', 503 );
 	}
 	$GLOBALS['lcrm_changed_records'][] = $id;
-	$deleted                           = $wpdb->delete(
-		$wpdb->postmeta,
-		array(
-			'post_id'  => $id,
-			'meta_key' => '_lcrm_capture_pending',
-		),
-		array( '%d', '%s' )
-	);
+	$deleted                           = $wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key IN (%s,%s,%s)", $id, '_lcrm_capture_pending', '_lcrm_capture_case', '_lcrm_capture_state' ) );
 	wp_cache_delete( $id, 'post_meta' );
 	return false !== $deleted && null === capture_retry_native_read( $id ) ? true : error( 'אישור קליטת הפנייה נכשל.', 503 );
 }
@@ -388,7 +428,7 @@ function capture_retry_ajax_enqueue( $lead, $cid, $source ) {
 		'lead'       => array_intersect_key( $lead, array_flip( array( 'name', 'phone', 'email', 'form' ) ) ),
 	);
 	if ( ! capture_retry_ajax_valid( $item ) ) {
-		return error( 'פרטי הפנייה הממתינה אינם תקינים.', 409 );
+		return capture_retry_failure( 'invalid_payload', 'פרטי הפנייה הממתינה אינם תקינים.' );
 	}
 	$id = wp_insert_post(
 		wp_slash(
@@ -397,7 +437,7 @@ function capture_retry_ajax_enqueue( $lead, $cid, $source ) {
 				'post_status'  => 'private',
 				'post_title'   => 'פנייה ממתינה',
 				'post_excerpt' => $source,
-				'post_content' => wp_json_encode( $item ),
+				'post_content' => wp_json_encode( $item, JSON_HEX_AMP | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT ),
 			)
 		),
 		true
@@ -425,7 +465,157 @@ function capture_retry_ajax_read( $id ) {
 		return error( 'פנייה ממתינה לא נמצאה.', 404 );
 	}
 	$item = json_decode( $rows[0]['post_content'], true, 10 );
-	return capture_retry_ajax_valid( $item ) && $item['source'] === $rows[0]['post_excerpt'] ? $item : error( 'פרטי הפנייה הממתינה אינם תקינים.', 409 );
+	return capture_retry_ajax_valid( $item ) && $item['source'] === $rows[0]['post_excerpt'] ? $item : capture_retry_failure( 'invalid_payload', 'פרטי הפנייה הממתינה אינם תקינים.' );
+}
+
+/**
+ * Remove an inbox item and its private attempt metadata in the capture transaction.
+ *
+ * @param int $id Inbox ID.
+ * @return true|\WP_Error
+ */
+function capture_retry_ajax_ack( $id ) {
+	global $wpdb;
+	if ( ! isset( $GLOBALS['lcrm_changed_records'] ) ) {
+		return error( 'אישור קליטת הפנייה מחייב שמירה משותפת.', 503 );
+	}
+	$GLOBALS['lcrm_changed_records'][] = $id;
+	if ( false === $wpdb->delete( $wpdb->postmeta, array( 'post_id' => $id ), array( '%d' ) ) ) {
+		return error( 'אישור קליטת הפנייה נכשל.', 503 );
+	}
+	$deleted = $wpdb->delete(
+		$wpdb->posts,
+		array(
+			'ID'          => $id,
+			'post_type'   => 'lcrm_capture',
+			'post_status' => 'private',
+		),
+		array( '%d', '%s', '%s' )
+	);
+	clean_post_cache( $id );
+	wp_cache_delete( $id, 'posts' );
+	wp_cache_delete( $id, 'post_meta' );
+	return 1 === $deleted ? true : error( 'אישור קליטת הפנייה נכשל.', 503 );
+}
+
+/**
+ * Reuse one immutable contact for an accepted AJAX source before creating an exception.
+ *
+ * @param array $item Frozen inbox item.
+ * @return int|\WP_Error Verified shared contact ID.
+ */
+function capture_retry_ajax_contact( $item ) {
+	$ids = source_record_ids( 'lcrm_contact', $item['source'] );
+	if ( is_wp_error( $ids ) ) {
+		return $ids;
+	}
+	if ( ! $ids ) {
+		$saved = save_record(
+			'lcrm_contact',
+			array(
+				'source' => $item['source'],
+				'name'   => $item['lead']['name'],
+				'phone'  => $item['lead']['phone'],
+				'email'  => $item['lead']['email'],
+			)
+		);
+		if ( is_wp_error( $saved ) ) {
+			return $saved;
+		}
+		$ids = array( $saved['id'] );
+	}
+	$contact = raw_records( $ids )[0];
+	if ( ! isset( $contact['source'], $contact['name'], $contact['phone'], $contact['email'] ) || $contact['source'] !== $item['source'] || ! is_string( $contact['name'] ) || ! is_string( $contact['phone'] ) || ! is_string( $contact['email'] ) ) {
+		return capture_retry_failure( 'invalid_payload', 'פרטי מקור הפנייה אינם תקינים.' );
+	}
+	if ( normalize_phone( $contact['phone'] ) !== normalize_phone( $item['lead']['phone'] ) || normalize_email( $contact['email'] ) !== normalize_email( $item['lead']['email'] ) ) {
+		return capture_retry_failure( 'identity_conflict', 'מזהה הפנייה כבר קיים עם פרטי קשר אחרים.' );
+	}
+	return (int) $ids[0];
+}
+
+/**
+ * Turn an unresolved CID into the existing manager-controlled assignment workflow.
+ *
+ * @param int   $id Inbox ID.
+ * @param array $item Frozen accepted event.
+ * @param bool  $ambiguous Whether several institutions shared the CID.
+ * @return array|\WP_Error Unmapped delivery or an unchanged pending inbox failure.
+ */
+function capture_retry_ajax_unmapped( $id, $item, $ambiguous ) {
+	global $wpdb;
+	$queries = $wpdb->num_queries;
+	$ids     = $wpdb->get_col( $wpdb->prepare( "SELECT DISTINCT p.ID FROM {$wpdb->posts} p INNER JOIN {$wpdb->postmeta} m ON m.post_id = p.ID AND m.meta_key = %s AND m.meta_value = %s WHERE p.post_type = %s AND p.post_status = %s ORDER BY p.ID ASC LIMIT 2", '_lcrm_capture_queue', (string) $id, 'lcrm_delivery', 'private' ) );
+	if ( $wpdb->num_queries <= $queries || $wpdb->last_error || ! is_array( $ids ) ) {
+		return error( 'לא ניתן לקרוא את חריג הקליטה.', 503 );
+	}
+	if ( count( $ids ) > 1 ) {
+		return capture_retry_failure( 'identity_conflict', 'נמצאו חריגי קליטה סותרים. נדרשת בדיקת מנהל.' );
+	}
+	if ( $ids ) {
+		$result = capture_retry_delivery( (int) $ids[0], $item['source'], 0, array_merge( $item['lead'], array( 'date' => $item['date'] ) ) );
+		if ( is_wp_error( $result ) || (int) ( $result['capture_queue'] ?? 0 ) !== $id || true !== ( $result['origin_live'] ?? false ) || 0 !== ( $result['bill'] ?? null ) || ( $result['capture_cid'] ?? null ) !== $item['cid'] || ( $result['capture_name'] ?? null ) !== $item['lead']['name'] ) {
+			return is_wp_error( $result ) ? $result : capture_retry_failure( 'identity_conflict', 'חריג הקליטה אינו תואם למקור הפנייה.' );
+		}
+	} else {
+		$contact = capture_retry_ajax_contact( $item );
+		if ( is_wp_error( $contact ) ) {
+			return $contact;
+		}
+		$lead   = array_merge(
+			$item['lead'],
+			array(
+				'contact'       => $contact,
+				'date'          => $item['date'],
+				'month'         => substr( $item['date'], 0, 7 ),
+				'source'        => $item['source'],
+				'institution'   => 0,
+				'state'         => 'unmapped',
+				'origin_live'   => true,
+				'capture_via'   => 'site_ajax',
+				'capture_error' => 'institution',
+				'capture_name'  => $item['lead']['name'],
+				'capture_cid'   => $item['cid'],
+				'capture_queue' => $id,
+				'capture_issue' => $ambiguous ? 'ambiguous_cid' : 'unknown_cid',
+				'phone_key'     => normalize_phone( $item['lead']['phone'] ),
+				'email_key'     => normalize_email( $item['lead']['email'] ),
+				'duplicate_of'  => 0,
+				'bill'          => 0,
+				'treatment'     => 'new',
+				'notes'         => array(),
+			)
+		);
+		$result = save_record( 'lcrm_delivery', $lead );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+		$inserted = $wpdb->insert(
+			$wpdb->postmeta,
+			array(
+				'post_id'    => $result['id'],
+				'meta_key'   => '_lcrm_capture_queue',
+				'meta_value' => (string) $id,
+			),
+			array( '%d', '%s', '%s' )
+		);
+		wp_cache_delete( $result['id'], 'post_meta' );
+		if ( 1 !== $inserted ) {
+			return error( 'שמירת מקור חריג הקליטה נכשלה.', 503 );
+		}
+		$queries    = $wpdb->num_queries;
+		$provenance = $wpdb->get_col( $wpdb->prepare( "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s", $result['id'], '_lcrm_capture_queue' ) );
+		if ( $wpdb->num_queries <= $queries || $wpdb->last_error || array( (string) $id ) !== $provenance ) {
+			return error( 'לא ניתן לאמת את מקור חריג הקליטה.', 503 );
+		}
+		$verified = capture_retry_delivery( $result['id'], $item['source'], 0, $lead );
+		if ( is_wp_error( $verified ) ) {
+			return $verified;
+		}
+		audit( 'ajax_capture_unmapped', $result['id'], array( 'reason' => $lead['capture_issue'] ) );
+	}
+	$ack = capture_retry_ajax_ack( $id );
+	return is_wp_error( $ack ) ? $ack : data( $result['id'] );
 }
 
 /**
@@ -439,6 +629,10 @@ function capture_retry_ajax_resolve( $id, $wait ) {
 	return locked(
 		static function () use ( $id ) {
 			global $wpdb;
+			$automatic = capture_case_auto( $id );
+			if ( is_wp_error( $automatic ) || ! $automatic ) {
+				return is_wp_error( $automatic ) ? $automatic : capture_retry_failure( 'manual_review', 'הפנייה ממתינה להחלטת מנהל.' );
+			}
 			$item = capture_retry_ajax_read( $id );
 			if ( is_wp_error( $item ) || isset( $item['institution'] ) ) {
 				return $item;
@@ -449,11 +643,11 @@ function capture_retry_ajax_resolve( $id, $wait ) {
 				return error( 'לא ניתן לקרוא את מוסד הפנייה.', 503 );
 			}
 			if ( 1 !== count( $ids ) ) {
-				return null;
+				return capture_retry_ajax_unmapped( $id, $item, count( $ids ) > 1 );
 			}
 			$item['institution']               = (int) $ids[0];
 			$GLOBALS['lcrm_changed_records'][] = $id;
-			$saved                             = $wpdb->update( $wpdb->posts, array( 'post_content' => wp_json_encode( $item ) ), array( 'ID' => $id ), array( '%s' ), array( '%d' ) );
+			$saved                             = $wpdb->update( $wpdb->posts, array( 'post_content' => wp_json_encode( $item, JSON_HEX_AMP | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT ) ), array( 'ID' => $id ), array( '%s' ), array( '%d' ) );
 			clean_post_cache( $id );
 			return false !== $saved && capture_retry_ajax_read( $id ) === $item ? $item : error( 'לא ניתן לשמור את מוסד הפנייה.', 503 );
 		},
@@ -468,23 +662,33 @@ function capture_retry_ajax_resolve( $id, $wait ) {
  * @param int $wait Lock wait.
  * @return array|null|\WP_Error
  */
-function capture_retry_ajax_attempt( $id, $wait = 5 ) {
+function capture_retry_ajax_attempt( $id, $wait = 0 ) {
+	$automatic = capture_case_auto( $id );
+	if ( is_wp_error( $automatic ) || ! $automatic ) {
+		if ( is_wp_error( $automatic ) ) {
+			capture_retry_schedule();
+		}
+		return is_wp_error( $automatic ) ? $automatic : capture_retry_failure( 'manual_review', 'הפנייה ממתינה להחלטת מנהל.' );
+	}
 	$item = capture_retry_ajax_read( $id );
 	if ( is_wp_error( $item ) ) {
-		return $item;
+		return capture_retry_result( $id, $item );
 	}
 	if ( ! isset( $item['institution'] ) ) {
 		$item = capture_retry_ajax_resolve( $id, $wait );
-		if ( null === $item || is_wp_error( $item ) ) {
-			return $item;
+		if ( is_wp_error( $item ) || 'unmapped' === ( $item['state'] ?? '' ) ) {
+			return capture_retry_result( $id, $item );
 		}
 	}
-	return locked(
+	$result = locked(
 		static function () use ( $id ) {
-			global $wpdb;
+			$automatic = capture_case_auto( $id );
+			if ( is_wp_error( $automatic ) || ! $automatic ) {
+				return is_wp_error( $automatic ) ? $automatic : capture_retry_failure( 'manual_review', 'הפנייה ממתינה להחלטת מנהל.' );
+			}
 			$item = capture_retry_ajax_read( $id );
 			if ( is_wp_error( $item ) || ! isset( $item['institution'] ) ) {
-				return is_wp_error( $item ) ? $item : error( 'מוסד הפנייה טרם נשמר.', 409 );
+				return is_wp_error( $item ) ? $item : capture_retry_failure( 'invalid_payload', 'מוסד הפנייה טרם נשמר.' );
 			}
 			$lead   = array_merge(
 				$item['lead'],
@@ -500,22 +704,41 @@ function capture_retry_ajax_attempt( $id, $wait = 5 ) {
 			}
 			$verified = capture_retry_delivery( $result['id'], $item['source'], $item['institution'], $lead );
 			if ( is_wp_error( $verified ) || 'sent' !== $verified['state'] || empty( $verified['origin_live'] ) ) {
-				return is_wp_error( $verified ) ? $verified : error( 'קליטת הפנייה החיה טרם אושרה.', 409 );
+				return is_wp_error( $verified ) ? $verified : capture_retry_failure( 'invalid_payload', 'קליטת הפנייה החיה טרם אושרה.' );
 			}
-			$GLOBALS['lcrm_changed_records'][] = $id;
-			$deleted                           = $wpdb->delete(
-				$wpdb->posts,
-				array(
-					'ID'        => $id,
-					'post_type' => 'lcrm_capture',
-				),
-				array( '%d', '%s' )
-			);
-			clean_post_cache( $id );
-			return 1 === $deleted ? $result : error( 'אישור קליטת הפנייה נכשל.', 503 );
+			$ack = capture_retry_ajax_ack( $id );
+			return is_wp_error( $ack ) ? $ack : $result;
 		},
 		$wait
 	);
+	return capture_retry_result( $id, $result );
+}
+
+/**
+ * Prepare a native source before acquiring the nonblocking financial lock.
+ *
+ * @param int $id Native source ID.
+ * @param int $wait Maximum lock wait; visitor and background paths use zero.
+ * @return array|\WP_Error Capture result or retained pending failure.
+ */
+function capture_retry_native_attempt( $id, $wait = 0 ) {
+	$automatic = capture_case_auto( $id );
+	if ( is_wp_error( $automatic ) || ! $automatic ) {
+		if ( is_wp_error( $automatic ) ) {
+			capture_retry_schedule();
+		}
+		return is_wp_error( $automatic ) ? $automatic : capture_retry_failure( 'manual_review', 'הפנייה ממתינה להחלטת מנהל.' );
+	}
+	$result = capture_retry_native_prepare( $id );
+	if ( ! is_wp_error( $result ) ) {
+		$result = locked(
+			static function () use ( $id ) {
+				return native_capture( $id );
+			},
+			$wait
+		);
+	}
+	return capture_retry_result( $id, $result );
 }
 
 /**
@@ -525,8 +748,15 @@ function capture_retry_ajax_attempt( $id, $wait = 5 ) {
  */
 function capture_pending_count() {
 	global $wpdb;
+	$guard = capture_case_state_guard();
+	if ( is_wp_error( $guard ) ) {
+		return $guard;
+	}
+	$native  = capture_case_pending_sql( 'p' );
+	$ajax    = capture_case_pending_sql( 'a' );
 	$queries = $wpdb->num_queries;
-	$count   = $wpdb->get_var( $wpdb->prepare( "SELECT (SELECT COUNT(*) FROM {$wpdb->posts} p WHERE p.post_type = %s AND p.post_status = %s AND EXISTS (SELECT 1 FROM {$wpdb->postmeta} m WHERE m.post_id = p.ID AND m.meta_key = %s)) + (SELECT COUNT(DISTINCT post_excerpt) FROM {$wpdb->posts} WHERE post_type = %s AND post_status = %s)", 'leads', 'publish', '_lcrm_capture_pending', 'lcrm_capture', 'private' ) );
+	// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- The helper adds only fixed, private state predicates for these literal aliases.
+	$count = $wpdb->get_var( $wpdb->prepare( "SELECT (SELECT COUNT(*) FROM {$wpdb->posts} p WHERE p.post_type = %s AND p.post_status = %s AND EXISTS (SELECT 1 FROM {$wpdb->postmeta} m WHERE m.post_id = p.ID AND m.meta_key = %s) AND {$native}) + (SELECT COUNT(DISTINCT a.post_excerpt) FROM {$wpdb->posts} a WHERE a.post_type = %s AND a.post_status = %s AND {$ajax})", 'leads', 'publish', '_lcrm_capture_pending', 'lcrm_capture', 'private' ) );
 	return $wpdb->num_queries > $queries && ! $wpdb->last_error && is_scalar( $count ) && ctype_digit( (string) $count ) ? (int) $count : error( 'לא ניתן לקרוא את מספר הפניות הממתינות.', 503 );
 }
 
@@ -581,9 +811,14 @@ function capture_retry_cursor( $value = null ) {
  */
 function capture_retry_ids( $cursor, $maximum = 0 ) {
 	global $wpdb;
-	$select = $maximum ? 'p.ID' : 'COALESCE(MAX(p.ID),0)';
-	$sql    = "SELECT {$select} FROM {$wpdb->posts} p WHERE ((p.post_type = %s AND p.post_status = %s AND EXISTS (SELECT 1 FROM {$wpdb->postmeta} m WHERE m.post_id = p.ID AND m.meta_key = %s)) OR (p.post_type = %s AND p.post_status = %s))";
-	$args   = array( 'leads', 'publish', '_lcrm_capture_pending', 'lcrm_capture', 'private' );
+	$guard = capture_case_state_guard();
+	if ( is_wp_error( $guard ) ) {
+		return $guard;
+	}
+	$select    = $maximum ? 'p.ID' : 'COALESCE(MAX(p.ID),0)';
+	$automatic = capture_case_auto_sql( 'p' );
+	$sql       = "SELECT {$select} FROM {$wpdb->posts} p WHERE ((p.post_type = %s AND p.post_status = %s AND EXISTS (SELECT 1 FROM {$wpdb->postmeta} m WHERE m.post_id = p.ID AND m.meta_key = %s)) OR (p.post_type = %s AND p.post_status = %s)) AND {$automatic}";
+	$args      = array( 'leads', 'publish', '_lcrm_capture_pending', 'lcrm_capture', 'private' );
 	if ( $maximum ) {
 		$sql .= ' AND p.ID > %d AND p.ID <= %d ORDER BY p.ID ASC LIMIT %d';
 		$args = array_merge( $args, array( $cursor, $maximum, CAPTURE_RETRY_BATCH ) );
@@ -655,27 +890,13 @@ function capture_retry_run( $continuation = false ) {
 			$result = null;
 			$post   = capture_retry_source( $id );
 			if ( is_wp_error( $post ) ) {
-				$result = $post;
+				$result = capture_retry_result( $id, $post );
 			} elseif ( $post && 'leads' === $post['post_type'] ) {
 				$marker = capture_retry_native_read( $id );
 				if ( is_array( $marker ) && ( isset( $marker['snapshot'] ) || $marker['created_at'] <= time() - 60 ) ) {
-					$marker = capture_retry_native_prepare( $id );
-					if ( ! is_wp_error( $marker ) ) {
-						try {
-							$result = locked(
-								static function () use ( $id ) {
-									return native_capture( $id );
-								},
-								0
-							);
-						} catch ( \Throwable $exception ) {
-							$result = error( 'לא ניתן לקרוא את קטלוג המוסדות.', 503 );
-						}
-					} else {
-						$result = $marker;
-					}
+					$result = capture_retry_native_attempt( $id, 0 );
 				} elseif ( is_wp_error( $marker ) ) {
-					$result = $marker;
+					$result = capture_retry_result( $id, $marker );
 				}
 			} else {
 				$result = capture_retry_ajax_attempt( $id, 0 );
@@ -723,6 +944,12 @@ function capture_retry_run( $continuation = false ) {
 }
 add_action(
 	'lcrm_capture_retry_hourly',
+	static function () {
+		capture_retry_run();
+	}
+);
+add_action(
+	'lcrm_capture_retry_soon',
 	static function () {
 		capture_retry_run();
 	}

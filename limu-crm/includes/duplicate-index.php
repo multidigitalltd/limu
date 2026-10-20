@@ -101,8 +101,14 @@ function duplicate_index_schedule( $delay = 60 ) {
 	}
 }
 
-/** Initialize upgrades after post types have been registered. */
+/**
+ * Initialize upgrades in cron or wp-admin after post types have been registered.
+ * Public requests keep the safe matching fallback until background indexing completes.
+ */
 function duplicate_index_init() {
+	if ( ! wp_doing_cron() && ( ! is_admin() || wp_doing_ajax() ) ) {
+		return;
+	}
 	$state = duplicate_index_state();
 	if ( is_wp_error( $state ) ) {
 		if ( 500 === ( $state->get_error_data()['status'] ?? 0 ) ) {

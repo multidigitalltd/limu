@@ -362,8 +362,13 @@ try {
     $retry_ambiguous_result = LimuCRM\capture_retry_ajax_attempt( $retry_ambiguous_queue );
     retry_check( ! is_wp_error( $retry_ambiguous_copy ) && is_wp_error( $retry_ambiguous_result ) && 2 === count( retry_deliveries( $retry_ajax_frozen_source ) ) && array( $retry_ambiguous_queue ) === retry_queue_ids( $retry_ajax_frozen_source ), 'Two committed rows for the same source and recipient fail closed without adding a third or acknowledging pending work' );
     wp_delete_post( $retry_ambiguous_copy['id'], true );
-    $retry_ambiguous_recovered = LimuCRM\capture_retry_ajax_attempt( $retry_ambiguous_queue );
-    retry_check( ! is_wp_error( $retry_ambiguous_recovered ) && $retry_ajax_frozen_success['id'] === $retry_ambiguous_recovered['id'] && ! retry_queue_ids( $retry_ajax_frozen_source ), 'Repairing an ambiguous source resumes using the original recipient delivery' );
+    $retry_ambiguous_resume = new WP_REST_Request( 'POST', '/limu-crm/v1/capture-case' );
+    $retry_ambiguous_resume->set_header( 'X-WP-Nonce', wp_create_nonce( 'wp_rest' ) );
+    $retry_ambiguous_resume->set_header( 'Content-Type', 'application/json' );
+    $retry_ambiguous_resume->set_body( wp_json_encode( array( 'id' => $retry_ambiguous_queue, 'action' => 'retry' ) ) );
+    $retry_ambiguous_recovered = rest_do_request( $retry_ambiguous_resume );
+    $retry_ambiguous_rows = retry_deliveries( $retry_ajax_frozen_source );
+    retry_check( 200 === $retry_ambiguous_recovered->get_status() && true === $retry_ambiguous_recovered->get_data()['completed'] && $retry_ajax_frozen_success['id'] === $retry_ambiguous_rows[0]['id'] && ! retry_queue_ids( $retry_ajax_frozen_source ), 'An explicit manager retry after repairing an ambiguous source resumes the original delivery without opening a second charge' );
     $retry_stale_contact = LimuCRM\raw_records( array( $retry_ajax_frozen_success['contact'] ) )[0];
     $retry_poisoned_contact = $retry_stale_contact;
     $retry_poisoned_contact['phone'] = '0599999988';
@@ -397,10 +402,13 @@ try {
     retry_clear_request();
     retry_cron();
 
-    // A persistent failure at the head must not starve later work or create an endless continuation.
+    // Assignment exceptions leave technical retry work without starving later sources or opening endless sweeps.
     $retry_blocked_heads = array();
+    $retry_blocked_sources = array();
     for ( $retry_index = 0; $retry_index < LimuCRM\CAPTURE_RETRY_BATCH; ++$retry_index ) {
-        $retry_blocked_heads[] = LimuCRM\capture_retry_ajax_enqueue( $retry_ajax_lead, $retry_tag . '-missing-' . $retry_index, 'ajax:' . wp_generate_uuid4() );
+        $retry_blocked_source = 'ajax:' . wp_generate_uuid4();
+        $retry_blocked_sources[] = $retry_blocked_source;
+        $retry_blocked_heads[] = LimuCRM\capture_retry_ajax_enqueue( $retry_ajax_lead, $retry_tag . '-missing-' . $retry_index, $retry_blocked_source );
     }
     $retry_fair_source = 'ajax:' . wp_generate_uuid4();
     $retry_fair_queue = LimuCRM\capture_retry_ajax_enqueue( $retry_ajax_lead, $retry_tag . '-moved-a', $retry_fair_source );
@@ -415,13 +423,18 @@ try {
         $retry_continue = retry_cron( true );
         if ( is_wp_error( $retry_continue ) ) { throw new RuntimeException( 'The fair continuation failed.' ); }
     }
-    retry_check( ! $retry_continue['active'] && 1 === count( retry_deliveries( $retry_fair_source ) ) && ! retry_queue_ids( $retry_fair_source ) && array( $retry_new_queue ) === retry_queue_ids( $retry_new_source ), 'Continuation uses fresh cursor state, reaches an eligible tail and defers sources beyond the frozen maximum' );
+    retry_check( ! $retry_continue['active'] && 1 === count( retry_deliveries( $retry_fair_source ) ) && ! retry_queue_ids( $retry_fair_source ) && array( $retry_new_queue ) === retry_queue_ids( $retry_new_source ), 'Continuation converts assignment exceptions, uses fresh cursor state, reaches an eligible tail and defers sources beyond the frozen maximum' );
     $retry_no_sweep = retry_cron( true );
     retry_check( ! is_wp_error( $retry_no_sweep ) && 0 === $retry_no_sweep['processed'] && false === $retry_no_sweep['active'] && ! retry_deliveries( $retry_new_source ), 'A stale continuation cannot open a new sweep around permanently unresolved sources' );
     $retry_next_sweep = retry_cron();
     for ( $retry_round = 0; $retry_round < LimuCRM\CAPTURE_RETRY_BATCH + 3 && ! is_wp_error( $retry_next_sweep ) && $retry_next_sweep['active']; ++$retry_round ) { $retry_next_sweep = retry_cron( true ); }
-    retry_check( ! is_wp_error( $retry_next_sweep ) && ! $retry_next_sweep['active'] && 1 === count( retry_deliveries( $retry_new_source ) ) && LimuCRM\CAPTURE_RETRY_BATCH === LimuCRM\capture_pending_count(), 'The next hourly sweep reaches newly queued work despite a full batch of permanent earlier failures' );
-    foreach ( $retry_blocked_heads as $retry_head ) { wp_delete_post( $retry_head, true ); }
+    retry_check( ! is_wp_error( $retry_next_sweep ) && ! $retry_next_sweep['active'] && 1 === count( retry_deliveries( $retry_new_source ) ) && 0 === LimuCRM\capture_pending_count(), 'The next hourly sweep reaches new sources while unknown recipients remain visible as lead assignment exceptions instead of technical backlog' );
+    $retry_all_assignable = true;
+    foreach ( $retry_blocked_sources as $retry_index => $retry_blocked_source ) {
+        $retry_assignment_rows = retry_deliveries( $retry_blocked_source );
+        $retry_all_assignable = $retry_all_assignable && ! get_post( $retry_blocked_heads[ $retry_index ] ) && 1 === count( $retry_assignment_rows ) && 'unmapped' === $retry_assignment_rows[0]['state'] && true === $retry_assignment_rows[0]['origin_live'];
+    }
+    retry_check( $retry_all_assignable, 'Every formerly permanent missing-CID head is retained as an actionable live assignment record without direct database deletion' );
 
     // Approval is immutable even when a previously missing live capture is retried later.
     $retry_exclusion = new WP_REST_Request( 'POST', '/limu-crm/v1/billing-exclusion' );
@@ -459,6 +472,10 @@ try {
     retry_clear_request();
     retry_cron();
     retry_check( is_wp_error( $retry_late_result[ $retry_late ] ) && is_array( retry_fresh_marker( $retry_late ) ) && ! retry_deliveries( 'legacy:' . $retry_late ) && $retry_bill === LimuCRM\raw_records( array( $retry_bill['id'] ) )[0], 'A retry in an approved month stays pending and cannot silently change the bill or create a late delivery' );
+    retry_check( 'review' === LimuCRM\capture_case_read( $retry_late )['state'] && 'approved_month' === LimuCRM\capture_case_read( $retry_late )['reason'], 'An immutable approved-period source is explicitly classified for manager review instead of endless automatic retries' );
+
+    $retry_worker_source = retry_source( $retry_title_b, $retry_month . '-14 10:00:00' );
+    retry_fault( $retry_busy, static function () { return LimuCRM\native_flush(); } );
 
     $retry_lock_calls = 0;
     $retry_waits = array();
@@ -472,9 +489,15 @@ try {
         return $query;
     };
     retry_fault( $retry_cron_busy, static function () { return retry_cron(); } );
-    retry_check( 1 === $retry_lock_calls && array( 0 ) === $retry_waits && is_array( retry_fresh_marker( $retry_late ) ), 'A busy worker tries the business lock without waiting and aborts its batch after the first contention' );
-    wp_delete_post( $retry_late, true );
-    retry_check( 0 === LimuCRM\capture_pending_count(), 'Deleting a pending source removes it from the manager backlog without inventing a delivery' );
+    retry_check( $retry_lock_calls >= 1 && $retry_lock_calls <= 2 && ! array_diff( $retry_waits, array( 0 ) ) && is_array( retry_fresh_marker( $retry_worker_source ) ), 'A busy worker uses only zero-wait locks and aborts its batch without multiplying contention across sources' );
+    foreach ( array( $retry_late, $retry_worker_source ) as $retry_manual_id ) {
+        $retry_close = new WP_REST_Request( 'POST', '/limu-crm/v1/capture-case' );
+        $retry_close->set_header( 'X-WP-Nonce', wp_create_nonce( 'wp_rest' ) );
+        $retry_close->set_header( 'Content-Type', 'application/json' );
+        $retry_close->set_body( wp_json_encode( array( 'id' => $retry_manual_id, 'action' => 'close', 'note' => 'Synthetic case handled manually without changing accounting.' ) ) );
+        retry_check( 200 === rest_do_request( $retry_close )->get_status(), 'A manager can close handled capture review work through the supported audited action' );
+    }
+    retry_check( 0 === LimuCRM\capture_pending_count() && is_array( retry_fresh_marker( $retry_late ) ) && ! retry_deliveries( 'legacy:' . $retry_late ) && $retry_bill === LimuCRM\raw_records( array( $retry_bill['id'] ) )[0], 'Supported manual closure removes handled cases from the active backlog while retaining source evidence and the approved bill' );
     retry_check( 0 === $retry_http_calls, 'Retry processing makes no external delivery, email or fiscal HTTP calls' );
     echo "OK $retry_passed durable capture retry assertions\n";
 } catch ( Throwable $exception ) {
