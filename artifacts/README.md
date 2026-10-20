@@ -12,6 +12,6 @@ SHA-256: `a80714df3cae3faedf32e2195d486f9b412e5855692bb370d64b1b00749eb468`. ג�
 
 ## ריצות חדשות
 
-[GitHub Actions](https://github.com/multidigitalltd/limu/actions/workflows/ci.yml) שומר את הלוגים והחבילה של כל ריצה כ־artifacts ל־14 יום. [הריצה המלאה של 0.1.9](https://github.com/multidigitalltd/limu/actions/runs/39398805142) עברה על PHP 7.4.33 ועל PHP 8.4. חבילות שחרור והחתימות נשמרות ב־[GitHub Releases](https://github.com/multidigitalltd/limu/releases).
+[GitHub Actions](https://github.com/multidigitalltd/limu/actions/workflows/ci.yml) שומר את הלוגים והחבילה של כל ריצה כ־artifacts ל־14 יום. [הריצה המלאה של 0.1.10](https://github.com/multidigitalltd/limu/actions/runs/39400400464) ו־[הריצה המלאה של 0.1.9](https://github.com/multidigitalltd/limu/actions/runs/39398805142) עברה על PHP 7.4.33 ועל PHP 8.4. חבילות שחרור והחתימות נשמרות ב־[GitHub Releases](https://github.com/multidigitalltd/limu/releases).
 
 תוצרים מקומיים ו־PDF אינם נכנסים למעקב Git בתיקייה זו.
