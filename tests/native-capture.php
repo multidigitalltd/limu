@@ -146,7 +146,8 @@ try {
 	update_post_meta( $b, 'cid', $prefix . '-cid-a' );
 	native_check( $ajax_a['id'] === LimuCRM\native_http_capture( $response, 'response', 'test', $args, $url )['id'], 'An accepted callback replay preserves its frozen recipient after CID configuration changes' );
 	unset( $GLOBALS['lcrm_native_ajax_source'], $GLOBALS['lcrm_native_ajax_date'], $GLOBALS['lcrm_native_ajax_results'], $GLOBALS['lcrm_native_ajax_queue'] );
-	native_check( null === LimuCRM\native_http_capture( $response, 'response', 'test', $args, $url ), 'Ambiguous CID mapping cannot disclose a contact to guessed institutions' );
+	$ambiguous = LimuCRM\native_http_capture( $response, 'response', 'test', $args, $url );
+	native_check( ! is_wp_error( $ambiguous ) && 'unmapped' === $ambiguous['state'] && 0 === $ambiguous['institution'] && true === $ambiguous['origin_live'], 'Ambiguous CID mapping becomes a live assignment exception without guessing either matching institution' );
 	$_REQUEST['action'] = array( 'institution_interested' );
 	native_check( null === LimuCRM\native_http_capture( $response, 'response', 'test', $args, $url ), 'Malformed public action selector is rejected safely' );
 	echo "OK $passed automatic native capture assertions\n";

@@ -45,7 +45,7 @@ function reconcile_duplicates( $changed ) {
 					$bills[ $item['month'] ] = bill_for( $item['institution'], $item['month'] );
 				}
 				if ( $item['bill'] || ( 'sent' === $item['state'] && $bills[ $item['month'] ] && 'approved' === $bills[ $item['month'] ]['state'] ) ) {
-					return error( 'הקליטה תשנה כפילות בתקופה שכבר אושרה. נדרשת התאמה כספית נפרדת.', 409 );
+					return capture_retry_failure( 'approved_month', 'הקליטה תשנה כפילות בתקופה שכבר אושרה. נדרשת התאמה כספית נפרדת.' );
 				}
 				$item['duplicate_of'] = $duplicate;
 				$result               = save_record( 'lcrm_delivery', $item, $item['id'] );

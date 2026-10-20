@@ -34,13 +34,13 @@ function permission( $request ) {
 add_action(
 	'rest_api_init',
 	function () {
-		foreach ( array( 'bootstrap', 'summary', 'deliveries', 'bills', 'payments', 'audit', 'export', 'report' ) as $route ) {
+		foreach ( array( 'bootstrap', 'summary', 'deliveries', 'bills', 'payments', 'audit', 'export', 'report', 'capture-cases' ) as $route ) {
 			register_rest_route(
 				'limu-crm/v1',
 				'/' . $route,
 				array(
 					'methods'             => 'GET',
-					'permission_callback' => __NAMESPACE__ . '\\permission',
+					'permission_callback' => __NAMESPACE__ . ( 'capture-cases' === $route ? '\\capture_case_permission' : '\\permission' ),
 					'callback'            => __NAMESPACE__ . '\\read_api',
 				)
 			);
@@ -67,6 +67,15 @@ add_action(
 				)
 			);
 		}
+		register_rest_route(
+			'limu-crm/v1',
+			'/capture-case',
+			array(
+				'methods'             => 'POST',
+				'permission_callback' => __NAMESPACE__ . '\\capture_case_permission',
+				'callback'            => __NAMESPACE__ . '\\capture_case_action',
+			)
+		);
 	}
 );
 /**
@@ -129,6 +138,11 @@ function public_item( $item ) {
 	if ( ! manager() ) {
 		$item['count'] = isset( $item['lines'] ) ? count( $item['lines'] ) : 0;
 		unset( $item['source'], $item['actor'], $item['approved_by'], $item['lines'], $item['notes'], $item['evidence'], $item['confirmed_by'], $item['contact'], $item['legacy_id'], $item['origin_live'], $item['capture_via'], $item['capture_error'], $item['billing_excluded_by'], $item['billing_excluded_at'] );
+		foreach ( array_keys( $item ) as $key ) {
+			if ( 0 === strpos( $key, 'capture_' ) ) {
+				unset( $item[ $key ] );
+			}
+		}
 		if ( isset( $item['duplicate_of'] ) ) {
 			$item['duplicate_of'] = (bool) $item['duplicate_of'];
 		}
@@ -208,6 +222,9 @@ function read_api( $request ) {
 	}
 	$route          = basename( $request->get_route() );
 	$billing_status = $request->get_param( 'billing_status' );
+	if ( 'capture-cases' === $route ) {
+		return capture_case_list( $request );
+	}
 	if ( null !== $billing_status && '' !== $billing_status && ( 'excluded' !== $billing_status || ! in_array( $route, array( 'deliveries', 'report', 'export' ), true ) ) ) {
 		return error( 'סינון מצב חיוב זמין רק לפניות.' );
 	}
@@ -573,7 +590,7 @@ function write_api( $request ) {
 		}
 		// Raw delivery snapshots reference their contact; remapping must reuse frozen identities.
 		$lead          = $item;
-		$lead['name']  = sanitize_text_field( substr( get_post_field( 'post_title', $id, 'raw' ), 0, 600 ) );
+		$lead['name']  = sanitize_text_field( substr( $item['capture_name'] ?? get_post_field( 'post_title', $id, 'raw' ), 0, 600 ) );
 		$lead['phone'] = $item['phone_key'] ?? '';
 		$lead['email'] = $item['email_key'] ?? '';
 		$results       = array();

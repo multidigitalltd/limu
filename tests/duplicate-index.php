@@ -13,6 +13,7 @@ $tag = 'duplicate-index-' . wp_generate_uuid4();
 $original_state = get_option( 'lcrm_duplicate_index', null );
 $original_cron = get_option( 'cron', array() );
 $original_user = get_current_user_id();
+$original_screen = $GLOBALS['current_screen'] ?? null;
 $original_settings = get_option( 'lcrm_settings', null );
 $failure = null;
 $write_fault = null;
@@ -57,6 +58,24 @@ try {
     index_check( ! LimuCRM\duplicate_index_valid_state( array( 'version' => 1, 'cursor' => 20, 'max_id' => 10, 'processed' => 0, 'done' => true ) ) && ! LimuCRM\duplicate_index_valid_state( array( 'version' => 1, 'cursor' => 1, 'max_id' => 2, 'processed' => 0, 'done' => true ) ), 'Invalid and prematurely completed cursor boundaries are rejected' );
     delete_option( 'lcrm_duplicate_index' );
     global $wpdb;
+    $visitor_queries = $wpdb->num_queries;
+    LimuCRM\duplicate_index_init();
+    index_check( $visitor_queries === $wpdb->num_queries, 'An ordinary public request performs no index initialization query' );
+    $GLOBALS['current_screen'] = new class { public function in_admin() { return true; } };
+    add_filter( 'wp_doing_ajax', '__return_true' );
+    $ajax_queries = $wpdb->num_queries;
+    LimuCRM\duplicate_index_init();
+    remove_filter( 'wp_doing_ajax', '__return_true' );
+    if ( null === $original_screen ) { unset( $GLOBALS['current_screen'] ); } else { $GLOBALS['current_screen'] = $original_screen; }
+    index_check( $ajax_queries === $wpdb->num_queries, 'A public admin-AJAX submission also performs no index initialization query' );
+    wp_clear_scheduled_hook( 'lcrm_duplicate_index_batch' );
+    add_filter( 'wp_doing_cron', '__return_true' );
+    LimuCRM\duplicate_index_init();
+    remove_filter( 'wp_doing_cron', '__return_true' );
+    $cron_initialized = LimuCRM\duplicate_index_read_state();
+    index_check( is_array( $cron_initialized ) && LimuCRM\duplicate_index_valid_state( $cron_initialized ) && ( $cron_initialized['done'] || false !== wp_next_scheduled( 'lcrm_duplicate_index_batch' ) ), 'A cron request initializes the authoritative index state and schedules incomplete backfill' );
+    delete_option( 'lcrm_duplicate_index' );
+    wp_clear_scheduled_hook( 'lcrm_duplicate_index_batch' );
     $query_fault = static function ( $query ) { return false !== strpos( $query, 'SELECT COALESCE(MAX(ID), 0)' ) ? 'SELECT missing_index_fixture_column FROM invalid_index_fixture_table' : $query; };
     $old_suppression = $wpdb->suppress_errors( true );
     add_filter( 'query', $query_fault );
@@ -109,7 +128,12 @@ try {
     $cached_repeat = index_capture( $a, '2024-04-15 10:00:00', $legacy['phone_key'], $legacy['email_key'] );
     index_check( $legacy['id'] === $cached_repeat['duplicate_of'], 'An uncommitted complete options-cache value cannot make an unindexed historical repeat billable' );
     $authoritative_state = LimuCRM\duplicate_index_state();
-    index_check( $cursor === $authoritative_state, 'Initialization reads the committed migration cursor instead of a valid-looking cached completion marker' );
+    index_check( $cursor === $authoritative_state, 'Explicit state initialization reads the committed cursor instead of a valid-looking cached completion marker' );
+    wp_clear_scheduled_hook( 'lcrm_duplicate_index_batch' );
+    add_filter( 'wp_doing_cron', '__return_true' );
+    LimuCRM\duplicate_index_init();
+    remove_filter( 'wp_doing_cron', '__return_true' );
+    index_check( false !== wp_next_scheduled( 'lcrm_duplicate_index_batch' ), 'A cron initializer schedules incomplete database work even when the options cache falsely claims completion' );
     wp_cache_delete( 'lcrm_duplicate_index', 'options' );
 
     $invalid = $oldest_snapshot; $invalid['duplicate_of'] = -1;
@@ -251,6 +275,8 @@ try {
     if ( $query_fault ) { remove_filter( 'query', $query_fault ); }
     if ( $cursor_fault ) { remove_filter( 'pre_update_option_lcrm_duplicate_index', $cursor_fault, 10 ); }
     remove_filter( 'wp_doing_cron', '__return_true' );
+    remove_filter( 'wp_doing_ajax', '__return_true' );
+    if ( null === $original_screen ) { unset( $GLOBALS['current_screen'] ); } else { $GLOBALS['current_screen'] = $original_screen; }
     remove_filter( 'pre_http_request', $no_http );
     remove_action( 'wp_insert_post', $track, 99 );
     foreach ( array_reverse( array_unique( $created ) ) as $id ) { wp_delete_post( $id, true ); }

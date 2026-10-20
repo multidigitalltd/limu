@@ -139,6 +139,8 @@
 .lcrm td.contact-cell { display: table-cell; }
 .lcrm .contact-name { display: block; }
 .lcrm .contact-meta { display: block; font-size: 14px; color: var(--muted); font-weight: 400; line-height: 1.4; direction: ltr; text-align: right; max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
+.lcrm .capture-note { display: block; max-width: 330px; margin-block-start: 5px; white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
+.lcrm .capture-table .actions { flex-wrap: wrap; min-width: 160px; }
 .lcrm .badge { display: inline-flex; align-items: center; border-radius: 6px; padding: 5px 9px; font-size: 13px; font-weight: 550; line-height: 1.4; background: #f0ebf8; color: #655076; white-space: nowrap; }
 .lcrm .badge.green { background: #edf5ef; color: #2e6847; }
 .lcrm .badge.orange { background: #fff3df; color: #805d1e; }

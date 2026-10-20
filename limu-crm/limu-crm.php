@@ -3,7 +3,7 @@
  * Plugin Name: crm
  * Description: crm
  * Update URI: false
- * Version: 0.1.11
+ * Version: 0.1.12
  * Requires at least: 6.6
  * Requires PHP: 7.4.33
  * License: GPL-2.0-or-later
@@ -18,7 +18,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 define( 'LIMU_CRM_FILE', __FILE__ );
-define( 'LIMU_CRM_VERSION', '0.1.11' );
+define( 'LIMU_CRM_VERSION', '0.1.12' );
 require_once __DIR__ . '/includes/assets.php';
 require_once __DIR__ . '/includes/domain.php';
 require_once __DIR__ . '/includes/store.php';
@@ -29,6 +29,7 @@ require_once __DIR__ . '/includes/read-cache.php';
 require_once __DIR__ . '/includes/capture.php';
 require_once __DIR__ . '/includes/native.php';
 require_once __DIR__ . '/includes/capture-retry.php';
+require_once __DIR__ . '/includes/capture-cases.php';
 require_once __DIR__ . '/includes/mapping-repair.php';
 require_once __DIR__ . '/includes/security.php';
 require_once __DIR__ . '/includes/turnstile.php';
@@ -93,6 +94,7 @@ register_deactivation_hook(
 		wp_clear_scheduled_hook( 'lcrm_duplicate_index_batch' );
 		wp_clear_scheduled_hook( 'lcrm_capture_retry_hourly' );
 		wp_clear_scheduled_hook( 'lcrm_capture_retry_batch' );
+		wp_clear_scheduled_hook( 'lcrm_capture_retry_soon' );
 		flush_rewrite_rules();
 	}
 );

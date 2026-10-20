@@ -583,7 +583,7 @@ function institution_deliveries( $id, $before = null, $after = null, $hydrate = 
  * @param string $type Private source record type.
  * @param string $source Stable source idempotency key.
  * @param int    $institution Recipient for delivery records; zero for contacts.
- * @return array At most one matching record ID.
+ * @return array|\WP_Error At most one matching record ID or a source conflict.
  * @throws \RuntimeException When a lookup fails or the source is ambiguous.
  */
 function source_record_ids( $type, $source, $institution = 0 ) {
@@ -612,8 +612,11 @@ function source_record_ids( $type, $source, $institution = 0 ) {
 	$queries = $wpdb->num_queries;
 	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Both fixed query shapes are prepared immediately above.
 	$ids = $wpdb->get_col( $sql );
-	if ( $wpdb->num_queries <= $queries || $wpdb->last_error || ! is_array( $ids ) || count( $ids ) > 1 ) {
+	if ( $wpdb->num_queries <= $queries || $wpdb->last_error || ! is_array( $ids ) ) {
 		throw new \RuntimeException( 'Source record lookup failed or is ambiguous.' );
+	}
+	if ( count( $ids ) > 1 ) {
+		return capture_retry_failure( 'identity_conflict', 'נמצאו רישומי מקור סותרים. נדרשת בדיקת מנהל.' );
 	}
 	return array_map( 'intval', $ids );
 }
@@ -643,13 +646,16 @@ function record_delivery( $lead, $institution, $source, $historical = false, $sa
 	$lead['phone_key'] = normalize_phone( $lead['phone'] ?? '' );
 	$lead['email_key'] = normalize_email( $lead['email'] ?? '' );
 	$existing          = source_record_ids( 'lcrm_delivery', $source, $institution );
+	if ( is_wp_error( $existing ) ) {
+		return $existing;
+	}
 	if ( $existing ) {
 		$item = raw_records( $existing )[0];
 		if ( ! isset( $item['source'], $item['institution'], $item['phone_key'], $item['email_key'] ) || $source !== $item['source'] || ( ! is_int( $item['institution'] ) && ! is_string( $item['institution'] ) ) || (string) $institution !== (string) $item['institution'] || ! is_string( $item['phone_key'] ) || ! is_string( $item['email_key'] ) || normalize_phone( $item['phone_key'] ) !== $item['phone_key'] || normalize_email( $item['email_key'] ) !== $item['email_key'] ) {
 			throw new \RuntimeException( 'Invalid delivery source snapshot.' );
 		}
 		if ( ! $historical && ( $item['phone_key'] !== $lead['phone_key'] || $item['email_key'] !== $lead['email_key'] ) ) {
-			return error( 'מזהה המסירה כבר קיים עם פרטי קשר אחרים.', 409 );
+			return capture_retry_failure( 'identity_conflict', 'מזהה המסירה כבר קיים עם פרטי קשר אחרים.' );
 		}
 		// Hydrate display details only; committed financial fields always take precedence.
 		return array_merge( data( $existing[0] ), $item );
@@ -657,11 +663,11 @@ function record_delivery( $lead, $institution, $source, $historical = false, $sa
 	if ( ! $historical ) {
 		$existing_bill = bill_for( $institution, substr( $lead['date'], 0, 7 ) );
 		if ( $existing_bill && 'approved' === $existing_bill['state'] ) {
-			return error( 'התקופה כבר אושרה. נדרשת התאמה כספית נפרדת.', 409 );
+			return capture_retry_failure( 'approved_month', 'התקופה כבר אושרה. נדרשת התאמה כספית נפרדת.' );
 		}
 	}
 	if ( ! $lead['phone_key'] && ! $lead['email_key'] && ! $historical ) {
-		return error( 'נדרש טלפון או אימייל תקין.' );
+		return capture_retry_failure( 'invalid_payload', 'נדרש טלפון או אימייל תקין.', 400 );
 	}
 	$contact_id = ! empty( $lead['contact'] ) ? absint( $lead['contact'] ) : 0;
 	if ( ! $contact_id && ! empty( $lead['legacy_id'] ) && 'leads' === get_post_type( $lead['legacy_id'] ) ) {
@@ -669,6 +675,9 @@ function record_delivery( $lead, $institution, $source, $historical = false, $sa
 	}
 	if ( ! $contact_id ) {
 		$contacts = source_record_ids( 'lcrm_contact', $source );
+		if ( is_wp_error( $contacts ) ) {
+			return $contacts;
+		}
 		if ( $contacts ) {
 			$contact_id = $contacts[0];
 			$contact    = raw_records( $contacts )[0];
@@ -683,7 +692,7 @@ function record_delivery( $lead, $institution, $source, $historical = false, $sa
 			$contact['phone_key'] = normalize_phone( $contact['phone'] );
 			$contact['email_key'] = normalize_email( $contact['email'] );
 			if ( ! $historical && ( $lead['phone_key'] !== $contact['phone_key'] || $lead['email_key'] !== $contact['email_key'] ) ) {
-				return error( 'מזהה הפנייה כבר קיים עם פרטי קשר אחרים.', 409 );
+				return capture_retry_failure( 'identity_conflict', 'מזהה הפנייה כבר קיים עם פרטי קשר אחרים.' );
 			}
 		} else {
 				$contact = save_record(

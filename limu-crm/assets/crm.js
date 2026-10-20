@@ -15,6 +15,7 @@
     deliveries: "מרכז לידים",
     bills: "חיובים ותשלומים",
     reports: "דוחות",
+    capture: "טיפול בקליטה",
     institutions: "מוסדות ותעריפים",
     settings: "הגדרות והרשאות",
     audit: "יומן פעילות"
@@ -308,9 +309,9 @@
     const capturePending = bootstrap.manager && Number.isSafeInteger(d.capture_pending) && d.capture_pending >= 0 ? d.capture_pending : null;
     const captureNotice = capturePending > 0 ? `<section class="rate-alert" id="capture-retry-alert" aria-labelledby="capture-retry-title">
       <div><strong id="capture-retry-title">${e(capturePending)} פניות ממתינות לקליטה</strong>
-      <p>ניסיון נוסף מתבצע אוטומטית מדי שעה. כל פנייה נספרת פעם אחת, גם אם מיועדת לכמה מוסדות.</p>
+      <p>תקלות זמניות נבדקות אוטומטית. פניות שדורשות החלטת מנהל ממתינות לטיפול ברשימה. כל פנייה נספרת פעם אחת, גם אם מיועדת לכמה מוסדות.</p>
       <p>הנתון כולל את כל התקופות והמוסדות ואינו מושפע מהסינון.</p>
-      </div></section>` : "";
+      </div><button class="button" id="open-capture-cases">צפייה בפניות הממתינות</button></section>` : "";
     const captureAttention = bootstrap.manager ? capturePending === null ? "" : `<div class="attention-item">
       <dt>פניות ממתינות לקליטה · כל המערכת</dt>
       <dd id="capture-pending-count">${e(capturePending)}</dd>
@@ -400,6 +401,7 @@
     document.getElementById("open-leads").addEventListener("click", () => navigate("deliveries", { month: filter.month, year: filter.year, date_from: filter.date_from, date_to: filter.date_to, institution: filter.institution }));
     document.getElementById("open-bills").addEventListener("click", () => navigate("bills", { month: filter.month, year: filter.year, date_from: filter.date_from, date_to: filter.date_to, institution: filter.institution }));
     document.getElementById("open-unmapped")?.addEventListener("click", () => navigate("deliveries", { month: filter.month, year: filter.year, date_from: filter.date_from, date_to: filter.date_to, institution: filter.institution, state: "unmapped" }));
+    document.getElementById("open-capture-cases")?.addEventListener("click", () => navigate("capture"));
     document.getElementById("missing-rates")?.addEventListener("click", async () => {
       await navigate("institutions");
       if (view !== "institutions") return;
@@ -408,6 +410,75 @@
         status.value = "missing";
         renderInstitutions();
       }
+    });
+  }
+  const captureStates = { retry: "ממתינה לניסיון חוזר", review: "דורשת החלטת מנהל", closed: "נסגרה לאחר טיפול ידני" };
+  function validCaptureCase(item) {
+    return item && Number.isSafeInteger(item.id) && item.id > 0 && Object.hasOwn(captureStates, item.state) &&
+      ["date", "name", "phone", "email", "reason_label", "last_attempt", "closed_at", "note"].every((key) => typeof item[key] === "string") &&
+      ["native", "ajax"].includes(item.source_kind) && Number.isSafeInteger(item.institution) && item.institution >= 0 && Number.isSafeInteger(item.attempts) && item.attempts >= 0 &&
+      (item.institutions === undefined || Array.isArray(item.institutions) && item.institutions.length <= 100 && item.institutions.every((id) => Number.isSafeInteger(id) && id > 0));
+  }
+  async function captureCases(token) {
+    if (!bootstrap.manager) throw new Error("אין הרשאה לטיפול בקליטת פניות.");
+    const state = filter.state || "active";
+    const result = await api("capture-cases?" + new URLSearchParams({ state, page: String(page) }));
+    if (token !== generation) return;
+    if (!result || !Array.isArray(result.items) || !result.items.every(validCaptureCase) || !Number.isSafeInteger(result.total) || result.total < 0 || !Number.isSafeInteger(result.pages) || result.pages < 0 || result.items.length > 30) {
+      throw new Error("לא ניתן לאמת את רשימת הפניות. יש לרענן ולנסות שוב.");
+    }
+    if (page > Math.max(1, result.pages)) {
+      page = Math.max(1, result.pages);
+      return captureCases(token);
+    }
+    const rows = result.items;
+    screen.innerHTML = heading("טיפול בקליטה", "תקלות זמניות נבדקות אוטומטית; חריגים דורשים החלטת מנהל", '<button class="button" id="capture-unmapped">פניות לשיוך במרכז הלידים</button>') +
+      `<form class="filters" id="capture-filters"><div><label for="capture-state">מצב טיפול</label>
+      <select id="capture-state" name="state"><option value="active" ${state === "active" ? "selected" : ""}>כל הפניות הפתוחות</option>
+      ${Object.entries(captureStates).map(([key, label]) => `<option value="${key}" ${state === key ? "selected" : ""}>${e(label)}</option>`).join("")}</select></div>
+      <button class="button primary" type="submit">הצגת פניות</button></form><p class="filter-summary">כל התקופות והמוסדות · ${e(state === "active" ? "פניות פתוחות" : captureStates[state] || "פניות")}</p>
+      <p class="callout">פניות ללא מוסד מזוהה מועברות למרכז הלידים לשיוך. חודש מאושר או פרטי קשר סותרים דורשים בירור לפני ניסיון נוסף. סגירת בירור שומרת את נתוני המקור ומתועדת ביומן.</p>
+      <p class="muted">כל שורה מציגה קליטה שטרם הושלמה. פנייה לכמה מוסדות עשויה להופיע ביותר משורה אחת; בדשבורד כל פנייה נספרת פעם אחת.</p>` +
+      (rows.length ? `<div class="table-wrap" tabindex="0" role="region" aria-label="טבלת טיפול בקליטת פניות"><table class="capture-table"><caption class="sr-only">פניות שממתינות לקליטה או נסגרו לאחר טיפול ידני</caption><thead><tr>
+      <th scope="col">מועד הפנייה</th><th scope="col">פונה</th><th scope="col">מקור ומוסד</th><th scope="col">מצב וסיבה</th><th scope="col">פעולות</th></tr></thead>
+      <tbody>${rows.map((item) => `<tr data-capture-row="${e(item.id)}"><td><span dir="ltr">${e(item.date || "—")}</span></td>
+      <td><strong class="contact-name">${e(item.name || "ללא שם")}</strong><span class="contact-meta" dir="ltr">${e(item.phone || "—")}</span><span class="contact-meta" dir="ltr">${e(item.email || "—")}</span></td>
+      <td>${e(item.source_kind === "ajax" ? "משלוח למוסד" : "פנייה באתר")}<span class="capture-note">${e(item.institutions?.length ? item.institutions.map(name).join(" · ") : name(item.institution))}</span><small class="capture-note">בירור מס׳ ${e(item.id)}</small></td>
+      <td>${badge(captureStates[item.state], item.state === "review" ? "orange" : "")}<span class="capture-note">${e(item.reason_label || "טרם נבדקה")}</span>
+      ${item.last_attempt ? `<small class="capture-note">ניסיון אחרון: <span dir="ltr">${e(item.last_attempt)}</span> · ניסיונות: ${e(item.attempts)}</small>` : ""}
+      ${item.closed_at ? `<small class="capture-note">נסגרה: <span dir="ltr">${e(item.closed_at)}</span></small>` : ""}</td>
+      <td><div class="actions">${item.state === "closed" ? `<button class="button" data-capture-id="${e(item.id)}" data-capture-action="reopen">פתיחה מחדש</button>` : `<button class="button" data-capture-id="${e(item.id)}" data-capture-action="retry">ניסיון קליטה נוסף</button><button class="button" data-capture-id="${e(item.id)}" data-capture-action="close">סגירה לאחר טיפול ידני</button>`}</div></td></tr>`).join("")}</tbody></table></div>` :
+        '<section class="card"><h2>אין פניות במצב שנבחר</h2><p class="muted">אפשר לבחור מצב אחר או לעבור למרכז הלידים לטיפול בפניות לשיוך.</p></section>') + pagination(result.total, result.pages);
+    document.getElementById("capture-unmapped").addEventListener("click", () => navigate("deliveries", { state: "unmapped" }));
+    document.getElementById("capture-filters").addEventListener("submit", (event) => {
+      event.preventDefault();
+      filter.state = event.target.elements.state.value;
+      page = 1;
+      load();
+    });
+    screen.querySelectorAll("[data-capture-action]").forEach((button) => button.addEventListener("click", () => captureCaseModal(rows.find((item) => item.id === Number(button.dataset.captureId)), button.dataset.captureAction)));
+    bindPages();
+  }
+  function captureCaseModal(item, action) {
+    if (!bootstrap.manager || !validCaptureCase(item) || !["retry", "close", "reopen"].includes(action)) return;
+    const closing = action === "close", title = closing ? "סגירה לאחר טיפול ידני" : action === "reopen" ? "פתיחת בירור מחדש" : "ניסיון קליטה נוסף";
+    openModal(`<h2 id="modal-title">${e(title)}</h2><p><strong>${e(item.name || "ללא שם")}</strong> · <span dir="ltr">${e(item.date)}</span></p>
+      <p>${e(item.reason_label || "הפנייה טרם נבדקה")}</p>${item.note ? `<p class="callout">סיכום טיפול קודם: ${e(item.note)}</p>` : ""}
+      <p class="muted">${closing ? "יש לסגור רק לאחר השלמת הטיפול הידני. הפנייה תישמר לביקורת ותוסר מהתור הפעיל. היא לא תירשם כפנייה שנקלטה, ולא יבוצע שינוי בחיובים או במסמכים." : "ייבדק ניסיון לקלוט את פרטי המקור השמורים. חיובים מאושרים ופרטי הקשר הקיימים אינם משתנים. אם נדרש בירור נוסף, הפנייה תישאר ברשימת הטיפול."}</p>
+      <form id="capture-case-form">${closing ? '<label for="capture-note">סיכום הטיפול הידני</label><textarea id="capture-note" name="note" required maxlength="1000" rows="4"></textarea>' : ""}${formError}
+      <button class="button primary" type="submit">${e(closing ? "אישור סגירת הבירור" : action === "reopen" ? "אישור פתיחה וניסיון נוסף" : "אישור ניסיון נוסף")}</button></form>`);
+    document.getElementById("capture-case-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const form = event.target;
+      submit(form, async (data) => {
+        const note = closing ? data.note.trim() : "";
+        if (closing && (!note || new TextEncoder().encode(note).length > 1000)) throw new Error(note ? "סיכום הטיפול ארוך מדי. יש לקצרו." : "יש לציין סיכום טיפול לפני סגירת הבירור.");
+        const result = await api("capture-case", { id: item.id, action, ...(closing ? { note } : {}) });
+        if (!result || typeof result.completed !== "boolean" || !Number.isSafeInteger(result.unmapped_id) || result.unmapped_id < 0 || (result.item !== null && (!validCaptureCase(result.item) || result.item.id !== item.id))) {
+          throw new Error("לא ניתן לאמת את תוצאת הפעולה. יש לרענן את הרשימה לפני ניסיון נוסף.");
+        }
+        return result;
+      }, (result) => result.completed ? result.unmapped_id > 0 ? "הפנייה הועברה למרכז הלידים ודורשת שיוך למוסד." : "הפנייה נקלטה במערכת." : result.item === null ? "הפעולה הסתיימה ללא אישור קליטה. הרשימה עודכנה." : result.item.state === "closed" ? "הבירור נסגר לאחר טיפול ידני. נתוני המקור נשמרו לביקורת." : result.item.state === "review" ? `הפנייה עדיין דורשת החלטת מנהל: ${result.item.reason_label}` : "הפנייה ממתינה לניסיון קליטה נוסף.");
     });
   }
   function deliveryTable(rows) {
@@ -465,6 +536,11 @@
       );
     });
   }
+  function captureAssignmentDetails(lead) {
+    if (!bootstrap.manager || lead.state !== "unmapped" || typeof lead.capture_cid !== "string" || !lead.capture_cid) return "";
+    const reason = { unknown_cid: "מזהה הנמען אינו משויך למוסד במערכת.", ambiguous_cid: "מזהה הנמען משויך לכמה מוסדות. יש לבחור את הנמען לפי המשלוח המקורי." }[lead.capture_issue] || "נדרש שיוך לפי המשלוח המקורי.";
+    return `<dt>מזהה הנמען במקור (CID)</dt><dd dir="ltr">${e(lead.capture_cid)}</dd><dt>סיבת הצורך בשיוך</dt><dd>${e(reason)}</dd>`;
+  }
   function bindDeliveryDetails() {
     screen.querySelectorAll("[data-detail]").forEach((button) => button.addEventListener("click", () => {
       const lead = items.find((item) => item.id === Number(button.dataset.detail));
@@ -484,6 +560,7 @@
             <dd>${e(lead.date)}</dd>
           <dt>טופס / תחום</dt>
             <dd>${e(lead.form)}</dd>
+          ${captureAssignmentDetails(lead)}
           <dt>מצב פנייה</dt>
             <dd>${e(stateName(lead.state))}</dd>
           <dt>מצב טיפול</dt>
@@ -523,6 +600,7 @@
       openModal(`
         <h2 id="modal-title">שיוך פנייה למוסד</h2>
         <p>${lead.origin_live ? "שם המוסד לא זוהה אוטומטית. יש לתקן את השיוך לפי הפנייה המקורית; כללי הכפילות והחיוב יחולו בהתאם." : "יש לבחור את המוסדות שאליהם משויכת הפנייה ההיסטורית. השיוך מיועד לדוחות בלבד ולא יוצר חיוב."}</p>
+        ${captureAssignmentDetails(lead) ? `<dl class="detail-list">${captureAssignmentDetails(lead)}</dl>` : ""}
         <form id="remap-form">
           <label for="remap-institutions">מוסדות (בחירה מרובה)</label>
           <select id="remap-institutions" name="institutions" multiple size="6" required>${institutionOptions("", false)}</select>
@@ -1193,6 +1271,10 @@
     history_batch: "יבוא היסטוריה",
     native_capture_error: "כשל בקליטת ליד",
     native_capture_exception: "ליד דורש שיוך",
+    ajax_capture_unmapped: "משלוח למוסד הועבר לשיוך ידני",
+    capture_case_closed: "בירור קליטה נסגר לאחר טיפול ידני",
+    capture_case_reopened: "בירור קליטה נפתח מחדש",
+    capture_case_retried: "מנהל ביקש ניסיון קליטה נוסף",
     dispatch_error: "כשל בסנכרון פנייה",
     export: "דוח יוצא",
     icount_client_linked: "לקוח iCount שויך",
@@ -1230,7 +1312,7 @@
     screen.setAttribute("aria-busy", "true");
     document.getElementById("breadcrumb").textContent = titles[view];
     try {
-      await { dashboard, deliveries, bills, reports, institutions, settings: settingsView, audit: auditView }[view](token);
+      await { dashboard, deliveries, bills, reports, capture: captureCases, institutions, settings: settingsView, audit: auditView }[view](token);
     } catch (err) {
       if (token === generation) {
         screen.innerHTML = '<section class="card"><h1>לא ניתן לטעון את הנתונים</h1><p id="load-error"></p><button class="button" id="retry">ניסיון חוזר</button></section>';
