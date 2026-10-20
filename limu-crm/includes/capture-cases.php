@@ -165,21 +165,46 @@ function capture_case_pending_sql( $alias = 'p' ) {
 }
 
 /**
- * Refuse structurally damaged state indexes before they can hide candidates.
- * Case details are still parsed authoritatively before every financial attempt.
+ * Validate both case details and their mirror before they can hide candidates.
+ * Keyset batches bound memory without issuing a separate query per source.
  *
  * @return true|\WP_Error
  */
 function capture_case_state_guard() {
 	global $wpdb;
 	$predicate = capture_case_sources_sql();
-	$queries   = $wpdb->num_queries;
-	// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- The predicate and metadata keys are fixed internal SQL without request values.
-	$invalid = $wpdb->get_var( "SELECT p.ID FROM {$wpdb->posts} p INNER JOIN {$wpdb->postmeta} case_meta ON case_meta.post_id = p.ID AND case_meta.meta_key IN ('_lcrm_capture_case','_lcrm_capture_state') WHERE {$predicate} GROUP BY p.ID HAVING COUNT(*) <> 2 OR SUM(BINARY case_meta.meta_key = '_lcrm_capture_case') <> 1 OR SUM(BINARY case_meta.meta_key = '_lcrm_capture_state') <> 1 OR SUM(BINARY case_meta.meta_key = '_lcrm_capture_state' AND BINARY case_meta.meta_value NOT IN ('retry','review','closed')) > 0 LIMIT 1" );
-	if ( $wpdb->num_queries <= $queries || $wpdb->last_error ) {
-		return error( 'לא ניתן לבדוק את מצבי בירור הפניות.', 503 );
-	}
-	return null === $invalid ? true : error( 'מצב בירור של פנייה אינו תקין. הספירה והסריקה נעצרו לבדיקה.', 409 );
+	$cursor    = 0;
+	do {
+		$queries = $wpdb->num_queries;
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Fixed internal predicates and keys; the keyset cursor is prepared. Values are capped before PHP decoding.
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT p.ID, COUNT(*) AS meta_count, SUM(BINARY case_meta.meta_key = '_lcrm_capture_case') AS detail_count, SUM(BINARY case_meta.meta_key = '_lcrm_capture_state') AS state_count, LEFT(MAX(CASE WHEN BINARY case_meta.meta_key = '_lcrm_capture_case' THEN case_meta.meta_value END),4097) AS case_value, LEFT(MAX(CASE WHEN BINARY case_meta.meta_key = '_lcrm_capture_state' THEN case_meta.meta_value END),32) AS state_value FROM {$wpdb->posts} p INNER JOIN {$wpdb->postmeta} case_meta ON case_meta.post_id = p.ID AND case_meta.meta_key IN ('_lcrm_capture_case','_lcrm_capture_state') WHERE {$predicate} AND p.ID > %d GROUP BY p.ID ORDER BY p.ID ASC LIMIT 100", $cursor ), ARRAY_A );
+		if ( $wpdb->num_queries <= $queries || $wpdb->last_error || ! is_array( $rows ) ) {
+			return error( 'לא ניתן לבדוק את מצבי בירור הפניות.', 503 );
+		}
+		foreach ( $rows as $row ) {
+			if ( 2 !== (int) $row['meta_count'] || 1 !== (int) $row['detail_count'] || 1 !== (int) $row['state_count'] ) {
+				return error( 'מצב בירור של פנייה אינו תקין. הספירה והסריקה נעצרו לבדיקה.', 409 );
+			}
+			$item = capture_case_parse(
+				array(
+					array(
+						'meta_key'   => '_lcrm_capture_case',
+						'meta_value' => $row['case_value'],
+					),
+					array(
+						'meta_key'   => '_lcrm_capture_state',
+						'meta_value' => $row['state_value'],
+					),
+				)
+			);
+			if ( is_wp_error( $item ) ) {
+				return error( 'מצב בירור של פנייה אינו תקין. הספירה והסריקה נעצרו לבדיקה.', 409 );
+			}
+			$cursor = (int) $row['ID'];
+		}
+		$batch_count = count( $rows );
+	} while ( 100 === $batch_count );
+	return true;
 }
 
 /**

@@ -309,6 +309,63 @@ try {
     try { $case_closed_cache = LimuCRM\capture_case_read( $case_identity_queue ); }
     finally { wp_cache_delete( $case_identity_queue, 'post_meta' ); }
     case_check( is_array( $case_closed_cache ) && 'closed' === $case_closed_cache['state'], 'A stale metadata cache cannot reopen a committed manual closure' );
+
+    // A scalar exclusion is never trusted when its full authoritative case is damaged or disagrees.
+    $case_identity_raw = $wpdb->get_results( $wpdb->prepare( "SELECT meta_key,meta_value FROM {$wpdb->postmeta} WHERE post_id=%d AND meta_key IN (%s,%s)", $case_identity_queue, '_lcrm_capture_case', '_lcrm_capture_state' ), ARRAY_A );
+    $case_identity_values = array_column( $case_identity_raw, 'meta_value', 'meta_key' );
+    $case_identity_original = maybe_unserialize( $case_identity_values['_lcrm_capture_case'] );
+    $case_identity_deliveries = case_deliveries( $case_identity_source );
+    $case_identity_review = $case_identity_original;
+    $case_identity_review['state'] = 'review';
+    $case_identity_retry = $case_identity_original;
+    $case_identity_retry['state'] = 'retry';
+    $case_damage_variants = array(
+        array( 'details' => 'broken serialized case', 'mirror' => 'closed', 'label' => 'Malformed full case details cannot silently hide a closed-mirror source' ),
+        array( 'details' => maybe_serialize( $case_identity_review ), 'mirror' => 'closed', 'label' => 'A closed mirror cannot hide full case details that actually require review' ),
+        array( 'details' => maybe_serialize( $case_identity_retry ), 'mirror' => 'review', 'label' => 'A review mirror cannot remove an automatic-retry case from the fair sweep' ),
+    );
+    try {
+        foreach ( $case_damage_variants as $case_damage ) {
+            $wpdb->update( $wpdb->postmeta, array( 'meta_value' => $case_damage['details'] ), array( 'post_id' => $case_identity_queue, 'meta_key' => '_lcrm_capture_case' ), array( '%s' ), array( '%d', '%s' ) );
+            $wpdb->update( $wpdb->postmeta, array( 'meta_value' => $case_damage['mirror'] ), array( 'post_id' => $case_identity_queue, 'meta_key' => '_lcrm_capture_state' ), array( '%s' ), array( '%d', '%s' ) );
+            wp_cache_set( $case_identity_queue, array( '_lcrm_capture_case' => array( $case_identity_values['_lcrm_capture_case'] ), '_lcrm_capture_state' => array( 'closed' ) ), 'post_meta' );
+            $case_damage_list = case_request( 'GET' );
+            case_check( is_wp_error( LimuCRM\capture_case_state_guard() ) && is_wp_error( LimuCRM\capture_pending_count() ) && is_wp_error( LimuCRM\capture_retry_ids( 0 ) ) && $case_damage_list->get_status() >= 400 && $case_identity_payload === LimuCRM\capture_retry_ajax_read( $case_identity_queue ) && $case_identity_deliveries === case_deliveries( $case_identity_source ) && $case_bill === LimuCRM\raw_records( array( $case_bill['id'] ) )[0] && 0 === $case_http_calls, $case_damage['label'] . ' or change its retained source, delivery or approved bill' );
+        }
+    } finally {
+        foreach ( $case_identity_values as $case_key => $case_value ) {
+            $wpdb->update( $wpdb->postmeta, array( 'meta_value' => $case_value ), array( 'post_id' => $case_identity_queue, 'meta_key' => $case_key ), array( '%s' ), array( '%d', '%s' ) );
+        }
+        wp_cache_delete( $case_identity_queue, 'post_meta' );
+    }
+    case_check( true === LimuCRM\capture_case_state_guard() && $case_identity_original === LimuCRM\capture_case_read( $case_identity_queue ), 'Restoring the original raw case pair restores a healthy guard without reopening its manual closure' );
+
+    // Integrity validation must reach later keyset batches, including archived cases outside the visible page.
+    $case_guard_queues = array();
+    for ( $case_guard_index = 0; $case_guard_index < 105; ++$case_guard_index ) {
+        $case_guard_id = LimuCRM\capture_retry_ajax_enqueue( case_lead( $case_date ), $case_tag . '-b', 'ajax:' . wp_generate_uuid4() );
+        if ( ! is_int( $case_guard_id ) ) { throw new RuntimeException( 'Cannot create a bounded guard fixture.' ); }
+        $case_guard_queues[] = $case_guard_id;
+    }
+    $case_guard_saved = LimuCRM\locked( static function () use ( $case_guard_queues, $case_identity_original ) {
+        foreach ( $case_guard_queues as $id ) {
+            $saved = LimuCRM\capture_case_write( $id, $case_identity_original );
+            if ( is_wp_error( $saved ) ) { return $saved; }
+        }
+        return true;
+    } );
+    case_check( true === $case_guard_saved && true === LimuCRM\capture_case_state_guard() && ! is_wp_error( LimuCRM\capture_pending_count() ), 'More than one hundred valid archived case pairs remain readable across bounded integrity batches' );
+    $case_guard_last = end( $case_guard_queues );
+    $case_guard_payload = LimuCRM\capture_retry_ajax_read( $case_guard_last );
+    try {
+        $wpdb->update( $wpdb->postmeta, array( 'meta_value' => 'damaged beyond the first batch' ), array( 'post_id' => $case_guard_last, 'meta_key' => '_lcrm_capture_case' ), array( '%s' ), array( '%d', '%s' ) );
+        $case_guard_list = case_request( 'GET' );
+        case_check( is_wp_error( LimuCRM\capture_case_state_guard() ) && is_wp_error( LimuCRM\capture_pending_count() ) && is_wp_error( LimuCRM\capture_retry_ids( 0 ) ) && $case_guard_list->get_status() >= 400 && $case_guard_payload === LimuCRM\capture_retry_ajax_read( $case_guard_last ) && $case_identity_deliveries === case_deliveries( $case_identity_source ) && $case_bill === LimuCRM\raw_records( array( $case_bill['id'] ) )[0] && 0 === $case_http_calls, 'A damaged archived pair beyond the first hundred cases fails visibly without losing its source or changing accounting' );
+    } finally {
+        $wpdb->update( $wpdb->postmeta, array( 'meta_value' => maybe_serialize( $case_identity_original ) ), array( 'post_id' => $case_guard_last, 'meta_key' => '_lcrm_capture_case' ), array( '%s' ), array( '%d', '%s' ) );
+        wp_cache_delete( $case_guard_last, 'post_meta' );
+    }
+
     $case_page_queues = array();
     for ( $case_page_index = 0; $case_page_index < 31; ++$case_page_index ) {
         $case_page_queues[] = LimuCRM\capture_retry_ajax_enqueue( case_lead( $case_date ), $case_tag . '-b', 'ajax:' . wp_generate_uuid4() );
