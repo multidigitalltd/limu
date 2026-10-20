@@ -74,12 +74,19 @@
     leads: '<path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z"/>',
     bill: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h5"/>',
     paid: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h3"/>',
-    balance: '<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v5c0 4 16 4 16 0V6M4 11v5c0 4 16 4 16 0v-5"/>'
+    balance: '<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v5c0 4 16 4 16 0V6M4 11v5c0 4 16 4 16 0v-5"/>',
+    filter: '<path d="M4 4h16l-6 7v8l-4 2V11z"/>',
+    reset: '<path d="M3 11a9 9 0 1 1 2 7M3 4v7h7"/>',
+    calendar: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M16 3v4M8 3v4M3 11h18M8 15h2M14 15h2"/>',
+    empty: '<rect x="4" y="3" width="16" height="18" rx="3"/><path d="M8 8h8M8 12h5M8 16h3"/>'
   };
   const icon = (key) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[key] || icons.leads}</svg>`;
   function metric(label, value, hint, key, emphasis = false) {
+    const separator = label.indexOf(" · ");
+    const title = separator < 0 ? label : label.slice(0, separator);
+    const scope = separator < 0 ? "" : label.slice(separator + 3);
     return `<article class="metric ${emphasis ? "metric-emphasis" : ""}" data-metric="${e(key)}">
-      <div class="metric-head"><span class="label">${e(label)}</span><span class="metric-icon">${icon(key)}</span></div>
+      <div class="metric-head"><span class="label"><span class="metric-title">${e(title)}</span>${scope ? `<span class="metric-scope"><span class="sr-only"> · </span>${e(scope)}</span>` : ""}</span><span class="metric-icon">${icon(key)}</span></div>
       <strong class="value">${value}</strong><span class="hint">${e(hint)}</span></article>`;
   }
   function navigate(next, selected = {}) {
@@ -125,8 +132,8 @@
       <div>
       <label for="filter-institution">מוסד</label>
       <select id="filter-institution" name="institution">${institutionOptions(filter.institution)}</select>
-      </div>${extra}<button class="button primary" type="submit">הצגת נתונים</button>
-      <button class="button" type="button" id="reset-filters">איפוס</button></form>`;
+      </div>${extra}<button class="button primary" type="submit">${icon("filter")}הצגת נתונים</button>
+      <button class="button" type="button" id="reset-filters">${icon("reset")}איפוס</button></form>`;
   }
   function bindFilters() {
     const period = document.getElementById("filter-period");
@@ -178,7 +185,7 @@
     });
   }
   function empty(text) {
-    return `<div class="empty"><strong>${e(text)}</strong>
+    return `<div class="empty"><span class="empty-icon" aria-hidden="true">${icon("empty")}</span><strong>${e(text)}</strong>
       <p class="muted">נתונים יופיעו כאן לאחר קליטה או יבוא. אפשר לשנות את הסינון.</p>
       </div>`;
   }
@@ -324,8 +331,8 @@
       <p>הספירה למוסדות כוללת פניות משויכות מההיסטוריה ומהקליטה השוטפת. בפניות אלה חסר שיוך למוסד, ולכן הן עדיין אינן כלולות בספירה למוסדות.</p>
       </div>
       <button class="button" id="open-unmapped">הצגת פניות לשיוך</button></section>` : "";
-    screen.innerHTML = heading("סקירה כללית", "מבט על הלידים, המוסדות והגבייה", `<button class="button" id="open-leads">צפייה בלידים</button>
-      <button class="button primary" id="open-bills">ניהול חיובים</button>`) + captureNotice + filters() + `<p class="filter-summary">${e(scopeLabel())}${filter.institution ? "" : " · כל המוסדות"}</p>${missing.length ? `<section class="rate-alert">
+    screen.innerHTML = heading("סקירה כללית", "מבט על הלידים, המוסדות והגבייה", `<button class="button" id="open-leads">${icon("leads")}צפייה בלידים</button>
+      <button class="button primary" id="open-bills">${icon("bill")}ניהול חיובים</button>`) + captureNotice + filters() + `<p class="filter-summary">${icon("calendar")}<span>${e(scopeLabel())}${filter.institution ? "" : " · כל המוסדות"}</span></p>${missing.length ? `<section class="rate-alert">
       <div><strong>${e(missing.length)} מוסדות ללא תעריף פעיל</strong>
       <p>יש להשלים תעריף כדי להכין עבורם חיובים.</p>
       </div>
@@ -482,7 +489,7 @@
     });
   }
   function deliveryTable(rows) {
-    return `<div class="table-wrap">
+    return `<div class="table-wrap" tabindex="0" role="region" aria-label="טבלת פניות למוסדות">
       <table>
       <caption class="sr-only">פניות למוסדות</caption>
       <thead>
@@ -648,7 +655,7 @@
     document.getElementById("print-leads").addEventListener("click", () => printReport("deliveries"));
   }
   function billTable(rows, selectable) {
-    return `<div class="table-wrap">
+    return `<div class="table-wrap" tabindex="0" role="region" aria-label="טבלת חיובים חודשיים">
       <table><caption class="sr-only">חיובים חודשיים</caption>
       <thead>
       <tr>${selectable ? '<th scope="col" class="no-print"><input id="select-all" type="checkbox" aria-label="בחירת כל החיובים הממתינים בעמוד"></th>' : ""}<th scope="col">מוסד</th>
@@ -1287,7 +1294,7 @@
   async function auditView(token) {
     const r = await api("audit?page=" + page);
     if (token !== generation) return;
-    screen.innerHTML = heading("יומן פעילות", "מי שינה תעריף, אישר חיוב או רשם תשלום — ומתי") + (r.items.length ? `<div class="table-wrap">
+    screen.innerHTML = heading("יומן פעילות", "מי שינה תעריף, אישר חיוב או רשם תשלום — ומתי") + (r.items.length ? `<div class="table-wrap" tabindex="0" role="region" aria-label="טבלת יומן פעילות">
       <table><caption class="sr-only">יומן ביקורת</caption>
       <thead>
       <tr>
