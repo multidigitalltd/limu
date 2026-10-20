@@ -208,17 +208,16 @@ function native_capture( $id ) {
 		if ( $exists ) {
 			return data( $exists[0] );
 		}
-		$lead['institution']    = 0;
-		$lead['source']         = $source;
-		$lead['state']          = 'unmapped';
-		$lead['month']          = substr( $post->post_date, 0, 7 );
-		$lead['duplicate_of']   = 0;
-		$lead['duplicate_mode'] = duplicate_policy( settings() );
-		$lead['bill']           = 0;
-		$lead['treatment']      = 'new';
-		$lead['notes']          = array();
-		$lead['capture_error']  = ! $destinations ? 'institution' : 'contact';
-		$result                 = save_record( 'lcrm_delivery', $lead );
+		$lead['institution']   = 0;
+		$lead['source']        = $source;
+		$lead['state']         = 'unmapped';
+		$lead['month']         = substr( $post->post_date, 0, 7 );
+		$lead['duplicate_of']  = 0;
+		$lead['bill']          = 0;
+		$lead['treatment']     = 'new';
+		$lead['notes']         = array();
+		$lead['capture_error'] = ! $destinations ? 'institution' : 'contact';
+		$result                = save_record( 'lcrm_delivery', $lead );
 		if ( ! is_wp_error( $result ) ) {
 			audit( 'native_capture_exception', $result['id'], array( 'reason' => $lead['capture_error'] ) );
 		}
@@ -240,7 +239,7 @@ function native_capture( $id ) {
 			$result['origin_live']    = true;
 			$result['capture_via']    = 'native';
 			$result['duplicate_of']   = 0;
-			$result['duplicate_mode'] = duplicate_policy( settings() );
+			$result['duplicate_mode'] = $result['duplicate_mode'] ?? duplicate_policy( institution_policy( $institution ) );
 			$result                   = save_record( 'lcrm_delivery', $result, $result['id'] );
 			if ( is_wp_error( $result ) ) {
 				return $result;

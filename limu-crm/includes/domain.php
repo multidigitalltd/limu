@@ -62,14 +62,28 @@ function valid_date( $value ) {
 	return $date && $date->format( 'Y-m-d' ) === $value;
 }
 /**
- * Matching is OR, scoped per institution, and excludes empty contact values.
+ * Retrieve only matching indexed anchors, with a stable earliest-first ordering.
  *
- * @param array $a First normalized contact.
- * @param array $b Second normalized contact.
- * @return mixed Operation result or validation error.
+ * @param array $item Delivery identity to compare.
+ * @param array $index Prior candidates indexed by phone/email and contact value.
+ * @return array Matching anchors, deduplicated by delivery ID.
  */
-function same_contact( $a, $b ) {
-	return ( ! empty( $a['phone_key'] ) && $a['phone_key'] === $b['phone_key'] ) || ( ! empty( $a['email_key'] ) && $a['email_key'] === $b['email_key'] );
+function duplicate_candidates( $item, $index ) {
+	$candidates = array();
+	foreach ( array( 'phone_key', 'email_key' ) as $field ) {
+		if ( ! empty( $item[ $field ] ) && isset( $index[ $field ][ $item[ $field ] ] ) ) {
+			foreach ( $index[ $field ][ $item[ $field ] ] as $previous ) {
+				$candidates[ $previous['id'] ] = $previous;
+			}
+		}
+	}
+	usort(
+		$candidates,
+		static function ( $a, $b ) {
+			return array( $a['date'], $a['id'] ) <=> array( $b['date'], $b['id'] );
+		}
+	);
+	return $candidates;
 }
 /**
  * Resolve mutable settings into a self-contained policy for each new delivery.
@@ -79,8 +93,8 @@ function same_contact( $a, $b ) {
  * @throws \InvalidArgumentException When the configured period is invalid.
  */
 function duplicate_policy( $config ) {
-	$mode = $config['duplicate_mode'] ?? 'calendar';
-	if ( in_array( $mode, array( 'calendar', 'rolling', 'days_30', 'days_90', 'days_180', 'months_24' ), true ) ) {
+	$mode = $config['duplicate_mode'] ?? 'all_time';
+	if ( in_array( $mode, array( 'all_time', 'calendar', 'rolling', 'days_30', 'days_90', 'days_180', 'months_24' ), true ) ) {
 		return $mode;
 	}
 	$days = $config['duplicate_days'] ?? 30;
@@ -94,10 +108,13 @@ function duplicate_policy( $config ) {
  *
  * @param string $current Current delivery timestamp.
  * @param string $mode Immutable calendar, month or day policy key.
- * @return string Earliest candidate timestamp in the site's timezone.
+ * @return string|null Earliest candidate timestamp, or no lower bound for all history.
  * @throws \InvalidArgumentException When a saved period is invalid.
  */
 function duplicate_window_start( $current, $mode ) {
+	if ( 'all_time' === $mode ) {
+		return null;
+	}
 	$date = new \DateTimeImmutable( $current, wp_timezone() );
 	if ( 'calendar' === $mode ) {
 		return $date->format( 'Y' ) . '-01-01 00:00:00';
@@ -133,6 +150,9 @@ function in_window( $previous, $current, $mode ) {
 	$b = new \DateTimeImmutable( $current, wp_timezone() );
 	if ( $a > $b ) {
 		return false;
+	}
+	if ( 'all_time' === $mode ) {
+		return true;
 	}
 	$start = new \DateTimeImmutable( duplicate_window_start( $current, $mode ), wp_timezone() );
 	return 'calendar' === $mode ? $a->format( 'Y' ) === $b->format( 'Y' ) : $a > $start;

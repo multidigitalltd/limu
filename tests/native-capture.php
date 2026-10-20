@@ -53,6 +53,7 @@ try {
 	$b = wp_insert_post( array( 'post_type' => 'institutions', 'post_status' => 'publish', 'post_title' => $prefix . ' ב' ) );
 	foreach ( array( $a => 5000, $b => 7500 ) as $id => $price ) {
 		update_post_meta( $id, '_lcrm_agreement', array( 'credit_days' => 30, 'rates' => array( array( 'from' => $start, 'price' => $price, 'vat_bp' => 1800 ) ) ) );
+		update_post_meta( $id, '_lcrm_duplicate_policy', array( 'duplicate_mode' => 'calendar', 'duplicate_days' => 30 ) );
 	}
 	$title_a = get_post_field( 'post_title', $a, 'raw' );
 	$title_b = get_post_field( 'post_title', $b, 'raw' );
@@ -80,13 +81,16 @@ try {
 	wp_update_post( array( 'ID' => $historical, 'post_title' => 'עדכון נתון היסטורי בלבד' ) );
 	update_post_meta( $historical, 'phone', '0529876503' );
 	native_check( ! LimuCRM\native_flush() && 'historical' === LimuCRM\data( $history['id'] )['state'], 'Editing an existing historical lead never turns it into a live billed lead' );
-	update_option( 'lcrm_settings', array( 'duplicate_mode' => 'custom', 'duplicate_days' => 45, 'automatic' => false, 'start_date' => $start ), false );
+	update_post_meta( $a, '_lcrm_duplicate_policy', array( 'duplicate_mode' => 'custom', 'duplicate_days' => 45 ) );
 	$unknown = native_test_lead( $prefix . ' missing', $month . '-07 10:00:00', '0529876504' );
 	$unmapped = LimuCRM\native_flush()[ $unknown ];
 	native_check( 'unmapped' === $unmapped['state'] && 0 === $unmapped['institution'] && $unmapped['origin_live'], 'Unresolved new recipient remains a private mapping exception with its live origin' );
-	native_check( 'days:45' === $unmapped['duplicate_mode'], 'Unmapped native exception freezes the custom number of days' );
+	native_check( ! isset( $unmapped['duplicate_mode'] ), 'New unmapped native exception waits for an institution before choosing a duplicate policy' );
 	$custom_unknown = native_test_lead( $prefix . ' custom-missing', $month . '-07 11:00:00', '0529876501' );
 	$custom_exception = LimuCRM\native_flush()[ $custom_unknown ];
+	// An exception saved by an older plugin version already has an immutable global-policy snapshot.
+	$custom_exception['duplicate_mode'] = 'days:45';
+	$custom_exception = LimuCRM\locked( function () use ( $custom_exception ) { return LimuCRM\save_record( 'lcrm_delivery', $custom_exception, $custom_exception['id'] ); } );
 	$bad = native_test_lead( $title_a, $month . '-08 10:00:00', 'invalid' );
 	$invalid = LimuCRM\native_flush()[ $bad ];
 	native_check( 'unmapped' === $invalid['state'] && 'contact' === $invalid['capture_error'], 'Invalid live contact remains a nonbillable private exception' );
@@ -96,7 +100,7 @@ try {
 	$race_result = LimuCRM\native_flush()[ $racing ][0];
 	native_check( $import_first['id'] === $race_result['id'] && 'sent' === $race_result['state'] && $race_result['origin_live'] && $race_result['duplicate_of'] === $deliveries[0]['id'], 'Only a source newly observed in this request is promoted after an import race, with duplicate re-evaluation' );
 	native_check( 'days:45' === $race_result['duplicate_mode'], 'Import-race promotion freezes custom days before duplicate reconciliation' );
-	update_option( 'lcrm_settings', array( 'duplicate_mode' => 'calendar', 'automatic' => false, 'start_date' => $start ), false );
+	update_post_meta( $a, '_lcrm_duplicate_policy', array( 'duplicate_mode' => 'calendar', 'duplicate_days' => 30 ) );
 	$remap_request = new WP_REST_Request( 'POST', '/limu-crm/v1/remap' );
 	$remap_request->set_header( 'X-WP-Nonce', wp_create_nonce( 'wp_rest' ) );
 	$remap_request->set_header( 'Content-Type', 'application/json' );

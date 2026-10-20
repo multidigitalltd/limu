@@ -11,17 +11,17 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 ?><!doctype html>
-<html lang="he" dir="rtl"><head><meta charset="<?php echo esc_attr( get_bloginfo( 'charset' ) ); ?>"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Limu CRM — ניהול מוסדות ולידים</title><?php wp_print_styles( array( 'limu-crm' ) ); ?></head>
+<html lang="he" dir="rtl"><head><meta charset="<?php echo esc_attr( get_bloginfo( 'charset' ) ); ?>"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CRM — ניהול מוסדות ולידים</title><?php wp_print_styles( array( 'limu-crm' ) ); ?></head>
 <body class="lcrm"><a class="skip-link" href="#main">דילוג לתוכן</a>
 <?php if ( ! is_user_logged_in() ) : ?>
 <main id="main" class="login-shell">
-<section class="login-intro" aria-label="Limu CRM">
-	<a class="brand" href="<?php echo esc_url( home_url( '/' ) ); ?>"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M9 7v18h15M15 7v12h9"></path></svg></span><span class="brand-name">limu<span>CRM</span></span></a>
+<section class="login-intro" aria-label="מערכת CRM">
+	<a class="brand" href="<?php echo esc_url( home_url( '/' ) ); ?>"><img class="brand-logo" src="<?php echo esc_url( plugins_url( 'assets/brand/logo.226feadc9690.png', LIMU_CRM_FILE ) ); ?>" width="768" height="261" alt="לימודים לחרדים" decoding="async"></a>
 	<div class="login-intro-copy"><span class="login-kicker">מרחב הניהול שלך</span><h2>כל המוסדות.<br>כל הפניות.<br><span>תמונה אחת ברורה.</span></h2><p>הלידים, החיובים והתשלומים שלכם —<br>במקום אחד.</p></div>
 	<div class="login-graphic" aria-hidden="true"><div class="login-graphic-head"><span></span><span></span><span></span></div><div class="login-graphic-cards"><i></i><i></i><i></i></div><div class="login-graphic-bars"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
 </section>
 <section class="login-card">
-	<a class="brand login-brand" href="<?php echo esc_url( home_url( '/' ) ); ?>"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M9 7v18h15M15 7v12h9"></path></svg></span><span class="brand-name">limu<span>CRM</span></span></a>
+	<a class="brand login-brand" href="<?php echo esc_url( home_url( '/' ) ); ?>"><img class="brand-logo" src="<?php echo esc_url( plugins_url( 'assets/brand/logo.226feadc9690.png', LIMU_CRM_FILE ) ); ?>" width="768" height="261" alt="לימודים לחרדים" decoding="async"></a>
 	<p class="eyebrow">כניסה למרחב הניהול</p><h1>ברוכים הבאים</h1><p class="muted">התחברו כדי להמשיך לסביבת העבודה שלכם.</p>
 	<?php if ( ! empty( $GLOBALS['lcrm_login_error'] ) ) : ?>
 		<p class="login-error" role="alert"><?php echo esc_html( $GLOBALS['lcrm_login_error'] ); ?></p>
@@ -36,7 +36,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	<a class="forgot-password" href="<?php echo esc_url( wp_lostpassword_url( home_url( '/crm/' ) ) ); ?>">שכחתם את הסיסמה?</a>
 </section></main>
 <?php elseif ( ! can_view() ) : ?>
-<main id="main" class="login-shell denied-shell"><section class="login-card"><p class="eyebrow">LIMU CRM</p><h1>אין הרשאה למערכת</h1><p class="muted">יש לפנות למנהל האתר לקבלת גישה למוסד שלכם.</p><a class="button" href="<?php echo esc_url( wp_logout_url( home_url( '/crm/' ) ) ); ?>">התנתקות</a></section></main>
+<main id="main" class="login-shell denied-shell"><section class="login-card"><p class="eyebrow">CRM</p><h1>אין הרשאה למערכת</h1><p class="muted">יש לפנות למנהל האתר לקבלת גישה למוסד שלכם.</p><a class="button" href="<?php echo esc_url( wp_logout_url( home_url( '/crm/' ) ) ); ?>">התנתקות</a></section></main>
 <?php else : ?>
 	<?php
 	$nav_items = array(
@@ -73,18 +73,25 @@ if ( ! defined( 'ABSPATH' ) ) {
 	}
 	?>
 <div class="app-shell">
-<aside class="sidebar" aria-label="ניווט ראשי">
-	<a class="brand" href="<?php echo esc_url( home_url( '/crm/' ) ); ?>"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M9 7v18h15M15 7v12h9"></path></svg></span><span class="brand-name">limu<span>CRM</span></span></a>
-	<p class="sidebar-caption">מרחב הניהול</p>
+<aside id="portal-nav" class="sidebar" aria-label="ניווט ראשי">
+	<a class="brand" href="<?php echo esc_url( home_url( '/crm/' ) ); ?>"><img class="brand-logo" src="<?php echo esc_url( plugins_url( 'assets/brand/logo.226feadc9690.png', LIMU_CRM_FILE ) ); ?>" width="768" height="261" alt="לימודים לחרדים" decoding="async"></a>
+	<p class="sidebar-caption">CRM · ניהול מוסדות ולידים</p>
 	<nav id="navigation" aria-label="מסכי המערכת">
-		<?php foreach ( $nav_items as $nav_key => $nav_item ) : ?>
+		<?php foreach ( array( 'dashboard', 'deliveries', 'institutions', 'bills', 'reports', 'settings', 'audit' ) as $nav_key ) : ?>
+			<?php
+			if ( ! isset( $nav_items[ $nav_key ] ) ) {
+				continue;
+			}
+			$nav_item = $nav_items[ $nav_key ];
+			?>
 			<button type="button" data-view="<?php echo esc_attr( $nav_key ); ?>" <?php echo 'dashboard' === $nav_key ? 'aria-current="page"' : ''; ?>><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="<?php echo esc_attr( $nav_item['path'] ); ?>"></path></svg></span><span><?php echo esc_html( $nav_item['label'] ); ?></span></button>
 		<?php endforeach; ?>
 	</nav>
 	<div class="sidebar-bottom"><span class="avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 21v-2a7 7 0 0 0-14 0v2 M17 7a4 4 0 1 1-8 0a4 4 0 0 1 8 0z"></path></svg></span><div class="user-identity"><strong><?php echo esc_html( wp_get_current_user()->display_name ); ?></strong><small><?php echo manager() ? 'מנהל מערכת' : 'נציג מוסד · צפייה בלבד'; ?></small></div><a class="logout-link" href="<?php echo esc_url( wp_logout_url( home_url( '/crm/' ) ) ); ?>"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5H5v14h4 M14 8l4 4-4 4 M9 12h9"></path></svg><span>יציאה</span></a></div>
 </aside>
+<button id="nav-backdrop" type="button" tabindex="-1" aria-label="סגירת תפריט הניווט" hidden></button>
 <div class="workspace">
-	<header class="topbar"><span class="breadcrumb"><span class="breadcrumb-root" dir="ltr">Limu CRM</span><span class="breadcrumb-separator" aria-hidden="true">/</span><strong id="breadcrumb">סקירה כללית</strong></span></header>
+	<header class="topbar"><div class="topbar-start"><button id="nav-toggle" type="button" class="icon-button" aria-label="פתיחת תפריט הניווט" aria-controls="portal-nav" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg></button><span class="breadcrumb"><span class="breadcrumb-root" dir="ltr">CRM</span><span class="breadcrumb-separator" aria-hidden="true">/</span><strong id="breadcrumb">סקירה כללית</strong></span></div><form id="quick-search" class="topbar-search" role="search"><label for="quick-search-input" class="sr-only">חיפוש לידים לפי שם</label><input id="quick-search-input" type="search" name="search" maxlength="200" placeholder="חיפוש לפי שם פונה"><button type="submit" class="icon-button" aria-label="חיפוש לידים"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m16 16 4 4"></path></svg></button></form><div class="topbar-user"><span class="avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 21v-2a7 7 0 0 0-14 0v2 M17 7a4 4 0 1 1-8 0a4 4 0 0 1 8 0z"></path></svg></span><span><?php echo esc_html( wp_get_current_user()->display_name ); ?></span></div><a class="mobile-logout" href="<?php echo esc_url( wp_logout_url( home_url( '/crm/' ) ) ); ?>">יציאה</a></header>
 	<main id="main" tabindex="-1"><div id="notification" role="status" aria-live="polite"></div><div id="screen" aria-busy="true"><p class="loading">טוען את סביבת העבודה…</p></div></main>
 </div></div>
 <dialog id="modal" aria-labelledby="modal-title"><button id="close-modal" type="button" class="icon-button" aria-label="סגירת חלון"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12 M18 6L6 18"></path></svg></button><div id="modal-content"></div></dialog>

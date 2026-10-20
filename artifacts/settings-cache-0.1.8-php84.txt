@@ -1,0 +1,8 @@
+PASS Login uses content-addressed CSS and privacy assets
+PASS Current portal bypasses a stale stable asset even when the cache ignores query versions
+PASS The original logo and both local font weights have immutable content fingerprints
+PASS Current settings load through actual REST without the retired mapping UI or JavaScript errors
+PASS Actual manager bootstrap retains an empty legacy forms array for cached clients
+PASS Published 0.1.1 JavaScript renders settings against actual current REST without the undefined-length failure
+PASS Cached global-policy clients receive a refresh error and cannot change current institution settings
+7 cache and settings compatibility browser checks passed.

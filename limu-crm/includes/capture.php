@@ -19,38 +19,51 @@ if ( ! defined( 'ABSPATH' ) ) {
  * @return array|\WP_Error Updated delivery or an immutable-period conflict.
  */
 function reconcile_duplicates( $changed ) {
-	$start = ( new \DateTimeImmutable( $changed['date'], wp_timezone() ) )->modify( '-3650 days' )->format( 'Y-m-d H:i:s' );
-	$items = institution_deliveries( $changed['institution'], null, $start );
-	$bases = array();
-	$bills = array();
+	$items   = institution_deliveries( $changed['institution'], null, null, false );
+	$bases   = array();
+	$history = array();
+	$roots   = array();
+	$bills   = array();
 	foreach ( $items as $item ) {
-		if ( 'sent' !== $item['state'] ) {
+		if ( ! in_array( $item['state'], array( 'sent', 'historical' ), true ) ) {
 			continue;
 		}
 		if ( $item['date'] >= $changed['date'] ) {
 			$duplicate = 0;
-			foreach ( $bases as $previous ) {
-				if ( same_contact( $item, $previous ) && in_window( $previous['date'], $item['date'], $item['duplicate_mode'] ?? 'calendar' ) ) {
-					$duplicate = $previous['id'];
+			$mode      = $item['duplicate_mode'] ?? 'calendar';
+			foreach ( duplicate_candidates( $item, 'all_time' === $mode ? $history : $bases ) as $previous ) {
+				if ( in_window( $previous['date'], $item['date'], $mode ) ) {
+					$duplicate = 'all_time' === $mode ? $roots[ $previous['id'] ] : $previous['id'];
 					break;
 				}
 			}
 			if ( $duplicate !== $item['duplicate_of'] ) {
-				if ( ! array_key_exists( $item['month'], $bills ) ) {
+				if ( 'sent' === $item['state'] && ! array_key_exists( $item['month'], $bills ) ) {
 					$bills[ $item['month'] ] = bill_for( $item['institution'], $item['month'] );
 				}
-				if ( $item['bill'] || ( $bills[ $item['month'] ] && 'approved' === $bills[ $item['month'] ]['state'] ) ) {
+				if ( $item['bill'] || ( 'sent' === $item['state'] && $bills[ $item['month'] ] && 'approved' === $bills[ $item['month'] ]['state'] ) ) {
 					return error( 'הקליטה תשנה כפילות בתקופה שכבר אושרה. נדרשת התאמה כספית נפרדת.', 409 );
 				}
-				$item['duplicate_of'] = $duplicate;
-				$result               = save_record( 'lcrm_delivery', $item, $item['id'] );
+				$item['duplicate_of']    = $duplicate;
+				$updated                 = data( $item['id'] );
+				$updated['duplicate_of'] = $duplicate;
+				$result                  = save_record( 'lcrm_delivery', $updated, $item['id'] );
 				if ( is_wp_error( $result ) ) {
 					return $result;
 				}
 			}
 		}
-		if ( ! $item['duplicate_of'] ) {
-			$bases[] = $item;
+		$roots[ $item['id'] ] = $item['duplicate_of'] ? ( $roots[ $item['duplicate_of'] ] ?? $item['duplicate_of'] ) : $item['id'];
+		foreach ( array( 'phone_key', 'email_key' ) as $field ) {
+			if ( ! empty( $item[ $field ] ) ) {
+				// Unlimited history needs only the earliest occurrence of each individual identity.
+				if ( ! isset( $history[ $field ][ $item[ $field ] ] ) ) {
+					$history[ $field ][ $item[ $field ] ] = array( $item );
+				}
+				if ( ! $item['duplicate_of'] ) {
+					$bases[ $field ][ $item[ $field ] ][] = $item;
+				}
+			}
 		}
 	}
 	return data( $changed['id'] );

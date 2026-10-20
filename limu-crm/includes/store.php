@@ -64,7 +64,7 @@ function error( $message, $status = 400 ) {
  */
 function settings() {
 	$defaults = array(
-		'duplicate_mode' => 'calendar',
+		'duplicate_mode' => 'all_time',
 		'duplicate_days' => 30,
 		'automatic'      => false,
 		'start_date'     => '',
@@ -83,6 +83,34 @@ function settings() {
 function agreement( $id ) {
 	$data = get_post_meta( $id, '_lcrm_agreement', true );
 	return is_array( $data ) ? $data : null;
+}
+/**
+ * Read the institution's independent duplicate window without inheriting retired global rules.
+ *
+ * @param int $id Institution ID.
+ * @return array Institution duplicate configuration.
+ * @throws \InvalidArgumentException When saved configuration is malformed.
+ */
+function institution_policy( $id ) {
+	$defaults = array(
+		'duplicate_mode' => 'all_time',
+		'duplicate_days' => 30,
+	);
+	if ( ! metadata_exists( 'post', $id, '_lcrm_duplicate_policy' ) ) {
+		return $defaults;
+	}
+	$config = get_post_meta( $id, '_lcrm_duplicate_policy', true );
+	if ( ! is_array( $config ) ) {
+		throw new \InvalidArgumentException( 'Invalid institution duplicate configuration.' );
+	}
+	$config = wp_parse_args( array_intersect_key( $config, $defaults ), $defaults );
+	$days   = $config['duplicate_days'];
+	if ( ( ! is_int( $days ) && ! is_string( $days ) ) || ! preg_match( '/^\d{1,4}$/D', (string) $days ) || (int) $days < 1 || (int) $days > 3650 ) {
+		throw new \InvalidArgumentException( 'Invalid institution duplicate day count.' );
+	}
+	duplicate_policy( $config );
+	$config['duplicate_days'] = (int) $days;
+	return $config;
 }
 /**
  * Read a private structured CRM record.
@@ -341,9 +369,10 @@ function query_records( $type, $filters = array(), $page = 1, $limit = 30, $sear
  * @param int             $id WordPress object ID.
  * @param string|null     $before Inclusive upper timestamp bound.
  * @param int|string|null $after Cursor or lower timestamp bound.
+ * @param bool            $hydrate Whether contact details are needed by the caller.
  * @return mixed Operation result or validation error.
  */
-function institution_deliveries( $id, $before = null, $after = null ) {
+function institution_deliveries( $id, $before = null, $after = null, $hydrate = true ) {
 	$meta = array(
 		array(
 			'key'   => '_lcrm_institution',
@@ -377,8 +406,17 @@ function institution_deliveries( $id, $before = null, $after = null ) {
 		)
 	);
 	update_meta_cache( 'post', $ids );
-	prime_contacts( $ids );
-	$items = array_map( __NAMESPACE__ . '\\data', $ids );
+	if ( $hydrate ) {
+		prime_contacts( $ids );
+		$items = array_map( __NAMESPACE__ . '\\data', $ids );
+	} else {
+		$items = array_map(
+			static function ( $record_id ) {
+				return get_post_meta( $record_id, '_lcrm_data', true );
+			},
+			$ids
+		);
+	}
 	usort(
 		$items,
 		function ( $a, $b ) {
@@ -486,19 +524,9 @@ function record_delivery( $lead, $institution, $source, $historical = false, $sa
 		}
 	}
 	$lead['contact'] = $contact_id;
-	$s               = settings();
-	$duplicate       = 0;
-	$policy          = null === $saved_policy ? duplicate_policy( $s ) : $saved_policy;
-	$start           = duplicate_window_start( $lead['date'], $policy );
-	foreach ( institution_deliveries( $institution, $lead['date'], $start ) as $previous ) {
-		if ( ! empty( $previous['duplicate_of'] ) || ( ! $historical && 'sent' !== $previous['state'] ) ) {
-			continue;
-		}
-		if ( same_contact( $lead, $previous ) && in_window( $previous['date'], $lead['date'], $policy ) ) {
-			$duplicate = $previous['id'];
-			break;
-		}
-	}
+	$policy          = null === $saved_policy ? duplicate_policy( institution_policy( $institution ) ) : $saved_policy;
+	// Validate a preserved remapping policy before saving. Reconciliation matches once below.
+	duplicate_window_start( $lead['date'], $policy );
 	$item   = array_merge(
 		$lead,
 		array(
@@ -508,13 +536,13 @@ function record_delivery( $lead, $institution, $source, $historical = false, $sa
 			'source'         => $source,
 			'month'          => substr( $lead['date'], 0, 7 ),
 			'state'          => $historical ? 'historical' : 'sent',
-			'duplicate_of'   => $duplicate,
+			'duplicate_of'   => 0,
 			'duplicate_mode' => $policy,
 			'bill'           => 0,
 		)
 	);
 	$result = save_record( 'lcrm_delivery', $item );
-	return is_wp_error( $result ) || $historical ? $result : reconcile_duplicates( $result );
+	return is_wp_error( $result ) ? $result : reconcile_duplicates( $result );
 }
 /**
  * Find the unique institution and service-month bill.

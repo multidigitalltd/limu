@@ -1,0 +1,13 @@
+{
+  "version": "0.1.8",
+  "plugin": {
+    "files": 27,
+    "bytes": 276219,
+    "sha256": "a528c2c5b86ef4789c08eb9223b2d3535153a5fb60b3b319332905caf3b2c530"
+  },
+  "documentation": {
+    "bytes": 385869,
+    "sha256": "c29298927650400ad1647fea30b866a066a781ba44c226b51fac53751e0ef4a9"
+  },
+  "validation": "Every archive entry verified byte-for-byte against the reviewed source, asset fingerprints verified, ZIP CRC passed."
+}

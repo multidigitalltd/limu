@@ -100,56 +100,51 @@ try {
     update_option( 'lcrm_settings', $sec_retired_settings, false );
     $sec_compat_bootstrap = sec_request( 'bootstrap' )->get_data();
     sec_check( array() === $sec_compat_bootstrap['settings']['forms'] && $sec_retired_settings === get_option( 'lcrm_settings' ) && ! array_key_exists( 'forms', LimuCRM\settings() ), 'Bootstrap provides an empty legacy forms array without exposing or changing stored retired mappings' );
-    $sec_compat_settings = array( 'duplicate_mode' => 'rolling', 'duplicate_days' => 30, 'automatic' => true, 'start_date' => $sec_settings['start_date'] );
-    $sec_compat_input = $sec_compat_settings;
-    unset( $sec_compat_input['duplicate_days'] );
+    $sec_compat_input = array( 'duplicate_mode' => 'rolling', 'automatic' => true, 'start_date' => $sec_settings['start_date'] );
     $sec_compat_save = sec_request( 'settings', $sec_compat_input + array( 'forms' => array() ) );
-    sec_check( 200 === $sec_compat_save->get_status() && $sec_compat_settings === $sec_compat_save->get_data() && $sec_compat_settings === get_option( 'lcrm_settings' ), 'Older settings clients can save their exact flags while the empty forms compatibility field is never persisted' );
+    sec_check( 409 === $sec_compat_save->get_status() && $sec_retired_settings === get_option( 'lcrm_settings' ), 'Older global duplicate settings clients receive a refresh conflict without changing stored legacy data' );
     foreach ( array( array( 'retired-form' => array() ), null, '', false, 0, (object) array(), array( array( 'malformed' ) ) ) as $sec_invalid_forms ) {
-        $sec_forms_rejected = sec_request( 'settings', $sec_compat_settings + array( 'forms' => $sec_invalid_forms ) );
-        sec_check( 400 === $sec_forms_rejected->get_status() && $sec_compat_settings === get_option( 'lcrm_settings' ), 'Settings reject nonempty, null, scalar, object or malformed legacy forms without modifying configuration: ' . wp_json_encode( $sec_invalid_forms ) );
+        $sec_forms_rejected = sec_request( 'settings', $sec_compat_input + array( 'forms' => $sec_invalid_forms ) );
+        sec_check( 400 === $sec_forms_rejected->get_status() && $sec_retired_settings === get_option( 'lcrm_settings' ), 'Settings reject nonempty, null, scalar, object or malformed legacy forms without modifying configuration: ' . wp_json_encode( $sec_invalid_forms ) );
     }
-    foreach ( array( 'agreement', 'member', 'prepare', 'approve', 'payment', 'import', 'treatment', 'remap' ) as $sec_forms_route ) {
+    foreach ( array( 'agreement', 'institution-policy', 'member', 'prepare', 'approve', 'payment', 'import', 'treatment', 'remap' ) as $sec_forms_route ) {
         $sec_forms_rejected = sec_request( $sec_forms_route, array( 'forms' => array() ) );
         sec_check( 400 === $sec_forms_rejected->get_status() && 'שדה לא תקין.' === $sec_forms_rejected->get_data()['message'], 'The empty legacy forms field is rejected before handling the ' . $sec_forms_route . ' mutation' );
     }
     sec_check( false === has_action( 'elementor_pro/forms/new_record', 'LimuCRM\\new_record' ) && false === has_action( 'elementor_pro/forms/validation', 'LimuCRM\\validate_turnstile' ), 'Legacy settings compatibility does not restore retired Elementor capture or validation hooks' );
 
-    foreach ( array( 'calendar', 'rolling', 'days_30', 'days_90', 'days_180', 'months_24', 'custom' ) as $sec_mode ) {
-        $sec_mode_settings = $sec_compat_settings;
-        $sec_mode_settings['duplicate_mode'] = $sec_mode;
-        $sec_mode_settings['duplicate_days'] = 47;
-        $sec_mode_response = sec_request( 'settings', $sec_mode_settings );
-        sec_check( 200 === $sec_mode_response->get_status() && $sec_mode_settings === get_option( 'lcrm_settings' ) && ( 'custom' === $sec_mode ? 'days:47' : $sec_mode ) === LimuCRM\duplicate_policy( LimuCRM\settings() ), 'The duplicate period is saved and resolved to its immutable delivery policy: ' . $sec_mode );
+    $sec_global_input = array( 'automatic' => true, 'start_date' => $sec_settings['start_date'] );
+    $sec_compat_settings = $sec_settings;
+    $sec_compat_settings['automatic'] = true;
+    $sec_global_save = sec_request( 'settings', $sec_global_input + array( 'forms' => array() ) );
+    sec_check( 200 === $sec_global_save->get_status() && $sec_compat_settings === $sec_global_save->get_data() && $sec_compat_settings === get_option( 'lcrm_settings' ), 'Current billing settings preserve retired global duplicate values and never persist the empty compatibility forms array' );
+    $sec_policy_institution = wp_insert_post( array( 'post_type' => 'institutions', 'post_status' => 'publish', 'post_title' => 'Security policy ' . wp_generate_uuid4() ) );
+    foreach ( array( 'all_time', 'calendar', 'rolling', 'days_30', 'days_90', 'days_180', 'months_24', 'custom' ) as $sec_mode ) {
+        $sec_mode_settings = array( 'duplicate_mode' => $sec_mode, 'duplicate_days' => 47 );
+        $sec_mode_response = sec_request( 'institution-policy', array( 'institution' => $sec_policy_institution ) + $sec_mode_settings );
+        sec_check( 200 === $sec_mode_response->get_status() && $sec_mode_settings === get_post_meta( $sec_policy_institution, '_lcrm_duplicate_policy', true ) && null === LimuCRM\agreement( $sec_policy_institution ) && ( 'custom' === $sec_mode ? 'days:47' : $sec_mode ) === LimuCRM\duplicate_policy( LimuCRM\institution_policy( $sec_policy_institution ) ), 'The institution duplicate period is saved without requiring a tariff and resolves to its immutable delivery policy: ' . $sec_mode );
     }
-    $sec_custom_missing = $sec_compat_input;
-    $sec_custom_missing['duplicate_mode'] = 'custom';
-    $sec_before_invalid_mode = get_option( 'lcrm_settings' );
-    sec_check( 400 === sec_request( 'settings', $sec_custom_missing )->get_status() && $sec_before_invalid_mode === get_option( 'lcrm_settings' ), 'A custom duplicate period requires an explicitly supplied day count, even when a previous count exists' );
+    $sec_custom_missing = array( 'institution' => $sec_policy_institution, 'duplicate_mode' => 'custom' );
+    $sec_before_invalid_mode = get_post_meta( $sec_policy_institution, '_lcrm_duplicate_policy', true );
+    sec_check( 400 === sec_request( 'institution-policy', $sec_custom_missing )->get_status() && $sec_before_invalid_mode === get_post_meta( $sec_policy_institution, '_lcrm_duplicate_policy', true ), 'A custom institution duplicate period requires an explicitly supplied day count, even when a previous count exists' );
     foreach ( array( 0, 3651, -1, true, false, null, '1.5', 30.5, 'abc', '', array() ) as $sec_invalid_days ) {
-        $sec_invalid_custom = $sec_compat_settings;
-        $sec_invalid_custom['duplicate_mode'] = 'custom';
-        $sec_invalid_custom['duplicate_days'] = $sec_invalid_days;
-        sec_check( 400 === sec_request( 'settings', $sec_invalid_custom )->get_status() && $sec_before_invalid_mode === get_option( 'lcrm_settings' ), 'Invalid custom duplicate day counts cannot modify configuration: ' . wp_json_encode( $sec_invalid_days ) );
+        $sec_invalid_custom = $sec_custom_missing + array( 'duplicate_days' => $sec_invalid_days );
+        sec_check( 400 === sec_request( 'institution-policy', $sec_invalid_custom )->get_status() && $sec_before_invalid_mode === get_post_meta( $sec_policy_institution, '_lcrm_duplicate_policy', true ), 'Invalid custom duplicate day counts cannot modify institution configuration: ' . wp_json_encode( $sec_invalid_days ) );
     }
-    $sec_invalid_mode = $sec_compat_settings;
-    $sec_invalid_mode['duplicate_mode'] = 'unknown';
-    sec_check( 400 === sec_request( 'settings', $sec_invalid_mode )->get_status() && $sec_before_invalid_mode === get_option( 'lcrm_settings' ), 'Unknown duplicate period identifiers are rejected' );
+    $sec_invalid_mode = array( 'institution' => $sec_policy_institution, 'duplicate_mode' => 'unknown', 'duplicate_days' => 47 );
+    sec_check( 400 === sec_request( 'institution-policy', $sec_invalid_mode )->get_status() && $sec_before_invalid_mode === get_post_meta( $sec_policy_institution, '_lcrm_duplicate_policy', true ), 'Unknown institution duplicate period identifiers are rejected' );
     foreach ( array( 1, 3650, '180' ) as $sec_valid_days ) {
-        $sec_valid_custom = $sec_compat_settings;
-        $sec_valid_custom['duplicate_mode'] = 'custom';
-        $sec_valid_custom['duplicate_days'] = $sec_valid_days;
-        $sec_valid_response = sec_request( 'settings', $sec_valid_custom );
+        $sec_valid_custom = $sec_custom_missing + array( 'duplicate_days' => $sec_valid_days );
+        $sec_valid_response = sec_request( 'institution-policy', $sec_valid_custom );
         sec_check( 200 === $sec_valid_response->get_status() && (int) $sec_valid_days === $sec_valid_response->get_data()['duplicate_days'], 'Custom duplicate windows accept valid integer bounds and normalize decimal digit input: ' . $sec_valid_days );
     }
-    $sec_preserve_days = $sec_compat_input;
-    $sec_preserve_days['duplicate_mode'] = 'days_90';
-    $sec_preserve_response = sec_request( 'settings', $sec_preserve_days );
+    $sec_preserve_days = array( 'institution' => $sec_policy_institution, 'duplicate_mode' => 'days_90' );
+    $sec_preserve_response = sec_request( 'institution-policy', $sec_preserve_days );
     sec_check( 200 === $sec_preserve_response->get_status() && 180 === $sec_preserve_response->get_data()['duplicate_days'], 'Selecting a preset without a day field preserves the manager\'s previous custom day count' );
-    $sec_advanced_before_legacy = get_option( 'lcrm_settings' );
+    $sec_advanced_before_legacy = get_post_meta( $sec_policy_institution, '_lcrm_duplicate_policy', true );
     $sec_legacy_reset = $sec_compat_input;
     $sec_legacy_reset['duplicate_mode'] = 'calendar';
-    sec_check( 409 === sec_request( 'settings', $sec_legacy_reset + array( 'forms' => array() ) )->get_status() && $sec_advanced_before_legacy === get_option( 'lcrm_settings' ), 'A cached legacy settings form cannot silently reset an advanced duplicate period to its calendar default' );
+    sec_check( 409 === sec_request( 'settings', $sec_legacy_reset + array( 'forms' => array() ) )->get_status() && $sec_advanced_before_legacy === get_post_meta( $sec_policy_institution, '_lcrm_duplicate_policy', true ) && $sec_compat_settings === get_option( 'lcrm_settings' ), 'A cached global settings form cannot reset an institution period or overwrite preserved global data' );
     update_option( 'lcrm_settings', $sec_settings, false );
 
     sec_check( null === LimuCRM\money( true ) && null === LimuCRM\money( false ), 'Boolean values cannot become monetary amounts' );
@@ -248,10 +243,8 @@ try {
     $sec_payment_input['amount'] = '2.00';
     sec_check( 409 === sec_request( 'payment', $sec_payment_input )->get_status() && 100 === LimuCRM\data( $sec_bill['id'] )['paid'], 'Changed payment payload cannot reuse an already committed request key' );
 
-    $sec_rolling_settings = $sec_settings;
-    $sec_rolling_settings['duplicate_mode'] = 'rolling';
-    update_option( 'lcrm_settings', $sec_rolling_settings, false );
     $sec_c = sec_institution( $sec_tag . ' rolling chain', $sec_month . '-01' );
+    update_post_meta( $sec_c, '_lcrm_duplicate_policy', array( 'duplicate_mode' => 'rolling', 'duplicate_days' => 30 ) );
     $sec_current_month = current_time( 'Y-m' );
     $sec_chain_start = ( new DateTimeImmutable( $sec_current_month . '-01', wp_timezone() ) )->modify( '-12 months' )->format( 'Y-m-d' );
     $sec_chain_b = sec_delivery( $sec_c, $sec_month . '-20 10:00:00', $sec_tag . ':chain-b', '0591116600' );
@@ -263,6 +256,7 @@ try {
     sec_check( $sec_chain_a['id'] === LimuCRM\data( $sec_chain_b['id'] )['duplicate_of'] && 0 === LimuCRM\data( $sec_chain_c['id'] )['duplicate_of'], 'Rolling reconciliation updates the full chain and expires at the older anniversary' );
 
     $sec_d = sec_institution( $sec_tag . ' frozen duplicate chain', $sec_month . '-01' );
+    update_post_meta( $sec_d, '_lcrm_duplicate_policy', array( 'duplicate_mode' => 'rolling', 'duplicate_days' => 30 ) );
     $sec_frozen_chain_start = ( new DateTimeImmutable( $sec_month . '-01', wp_timezone() ) )->modify( '-12 months' )->format( 'Y-m-d' );
     $sec_frozen_chain_b = sec_delivery( $sec_d, $sec_previous_month . '-20 10:00:00', $sec_tag . ':frozen-chain-b', '0591117700' );
     $sec_frozen_chain_c = sec_delivery( $sec_d, $sec_month . '-03 10:00:00', $sec_tag . ':frozen-chain-c', '0591117700' );
@@ -309,6 +303,7 @@ try {
     sec_check( 400 === sec_request( 'deliveries', null, array( 'search' => str_repeat( 'x', 201 ) ) )->get_status(), 'Oversized search is rejected before database work' );
     sec_check( 400 === sec_request( 'treatment', array( 'id' => $sec_older['id'], 'treatment' => 'new', 'note' => str_repeat( 'x', 100000 ) ) )->get_status(), 'Oversized mutation input is rejected before persistence' );
     sec_check( 403 === sec_request( 'treatment', array( 'id' => $sec_older['id'], 'treatment' => 'new' ), array(), false )->get_status(), 'Manager mutation without a REST nonce is rejected' );
+    sec_check( 403 === sec_request( 'institution-policy', array( 'institution' => $sec_policy_institution, 'duplicate_mode' => 'all_time' ), array(), false )->get_status() && $sec_advanced_before_legacy === get_post_meta( $sec_policy_institution, '_lcrm_duplicate_policy', true ), 'Institution policy mutation without a REST nonce is rejected without changing its saved period' );
     sec_check( 404 === sec_request( 'confirm', array( 'id' => $sec_older['id'], 'evidence' => 'This endpoint must not exist' ) )->get_status(), 'Manual per-lead confirmation route is unavailable even to administrators' );
     sec_check( 400 === sec_request( 'prepare', array( 'month' => $sec_month, 'institutions' => array_fill( 0, 21, $sec_a ) ) )->get_status(), 'Oversized prepare batch is rejected before deduplication or truncation' );
     sec_check( 400 === sec_request( 'approve', array( 'ids' => array_fill( 0, 21, $sec_bill['id'] ) ) )->get_status(), 'Oversized approve batch is rejected before deduplication or truncation' );
@@ -377,6 +372,7 @@ try {
     sec_check( 403 === sec_request( 'summary', null, array( 'institution' => $sec_a ) )->get_status(), 'All-period dashboard rejects a forged institution filter' );
     sec_check( 403 === sec_request( 'deliveries', null, array( 'institution' => $sec_a ) )->get_status(), 'Blank institution assignment cannot request another institution directly' );
     sec_check( 403 === sec_request( 'audit' )->get_status() && 403 === sec_request( 'treatment', array( 'id' => $sec_older['id'], 'treatment' => 'new' ) )->get_status(), 'Institution role cannot access audit records or mutate deliveries' );
+    sec_check( 403 === sec_request( 'institution-policy', array( 'institution' => $sec_policy_institution, 'duplicate_mode' => 'all_time' ) )->get_status() && $sec_advanced_before_legacy === get_post_meta( $sec_policy_institution, '_lcrm_duplicate_policy', true ), 'Institution accounts cannot change their own or another institution duplicate period' );
     sec_check( ! current_user_can( 'read_post', $sec_older['id'] ) && ! current_user_can( 'edit_post', $sec_bill['id'] ), 'Native WordPress private-record capabilities also deny institution users' );
 
     // The institution picker is complete even when there are more than 100 permitted recipients.
@@ -429,7 +425,7 @@ try {
     wp_set_current_user( $sec_user_id );
     $sec_many_member = sec_request( 'bootstrap' )->get_data();
     $sec_many_member_ids = array_column( $sec_many_member['institutions'], 'id' );
-    sec_check( 101 === count( $sec_many_member_ids ) && ! array_diff( $sec_many_ids, $sec_many_member_ids ) && ! in_array( $sec_a, $sec_many_member_ids, true ) && ! array_filter( $sec_many_member['institutions'], static fn( $item ) => isset( $item['agreement'] ) || isset( $item['icount_client'] ) ), 'A representative assigned to 101 institutions receives all its assignments without other institutions or manager-only tariff/client fields' );
+    sec_check( 101 === count( $sec_many_member_ids ) && ! array_diff( $sec_many_ids, $sec_many_member_ids ) && ! in_array( $sec_a, $sec_many_member_ids, true ) && ! array_filter( $sec_many_member['institutions'], static fn( $item ) => isset( $item['agreement'] ) || isset( $item['icount_client'] ) || isset( $item['duplicate_policy'] ) ), 'A representative assigned to 101 institutions receives all its assignments without other institutions or manager-only tariff/client/policy fields' );
     sec_check( 403 === sec_request( 'export', null, array( 'target' => 'deliveries', 'institution' => $sec_a ) )->get_status() && 403 === sec_request( 'report', null, array( 'target' => 'bills', 'institution' => $sec_a ) )->get_status(), 'Complete institution lists preserve foreign-institution access denial for Excel and print reports' );
     wp_set_current_user( 0 );
     sec_check( 403 === sec_request( 'bootstrap' )->get_status(), 'Anonymous requests remain denied' );

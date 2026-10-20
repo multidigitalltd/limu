@@ -1,0 +1,122 @@
+PASS Lead ranges include midnight at the start and the final second at the end, excluding neighboring dates and other institutions
+PASS A single valid leap day includes its entire local day
+PASS A custom range includes whole monthly bills for every service month touching its dates
+PASS Choosing portions of two months retains the same whole monthly bills and amounts
+PASS Dashboard range totals share the lead boundaries and monthly billing scope
+PASS Both lead counters apply the inclusive selected date boundaries and institution filter
+PASS Payments stored as dates include both boundary days without requiring a timestamp
+PASS Production payment recording stores the actual payment date without a synthetic month index: 2024-01-01
+PASS Production payment recording stores the actual payment date without a synthetic month index: 2024-12-31
+PASS Production payment recording stores the actual payment date without a synthetic month index: 2025-01-01
+PASS Calendar-month payment filters use actual dates and include the last day of a leap-year February without month metadata
+PASS Calendar-year payment filters include January first through December last and exclude the following year
+PASS Payments are selected by their actual calendar period even when their bill service month belongs to January of a different year
+PASS The PDF print snapshot uses the same filtered lead rows
+PASS The PDF billing snapshot preserves whole monthly amounts within the selected date range
+PASS Excel exports contain precisely the selected lead range and institution
+PASS Excel billing exports use the same service months as the list and PDF
+PASS Invalid or ambiguous date ranges are rejected by summary: {"date_from":"2024-03-02","date_to":"2024-03-01"}
+PASS Invalid or ambiguous date ranges are rejected by summary: {"date_from":"2024-02-29"}
+PASS Invalid or ambiguous date ranges are rejected by summary: {"date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by summary: {"date_from":"2023-02-29","date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by summary: {"date_from":"2024-02-30","date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by summary: {"date_from":"2024-02-29 00:00:00","date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by summary: {"date_from":"2024-02-2\u0000","date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by summary: {"date_from":["2024-02-29"],"date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by summary: {"date_from":"2024-02-29","date_to":false}
+PASS Invalid or ambiguous date ranges are rejected by summary: {"date_from":"2024-02-29","date_to":"2024-03-31","year":"2024"}
+PASS Invalid or ambiguous date ranges are rejected by summary: {"date_from":"2024-02-29","date_to":"2024-03-31","month":"2024-03"}
+PASS Invalid or ambiguous date ranges are rejected by deliveries: {"date_from":"2024-03-02","date_to":"2024-03-01"}
+PASS Invalid or ambiguous date ranges are rejected by deliveries: {"date_from":"2024-02-29"}
+PASS Invalid or ambiguous date ranges are rejected by deliveries: {"date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by deliveries: {"date_from":"2023-02-29","date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by deliveries: {"date_from":"2024-02-30","date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by deliveries: {"date_from":"2024-02-29 00:00:00","date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by deliveries: {"date_from":"2024-02-2\u0000","date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by deliveries: {"date_from":["2024-02-29"],"date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by deliveries: {"date_from":"2024-02-29","date_to":false}
+PASS Invalid or ambiguous date ranges are rejected by deliveries: {"date_from":"2024-02-29","date_to":"2024-03-31","year":"2024"}
+PASS Invalid or ambiguous date ranges are rejected by deliveries: {"date_from":"2024-02-29","date_to":"2024-03-31","month":"2024-03"}
+PASS Invalid or ambiguous date ranges are rejected by bills: {"date_from":"2024-03-02","date_to":"2024-03-01"}
+PASS Invalid or ambiguous date ranges are rejected by bills: {"date_from":"2024-02-29"}
+PASS Invalid or ambiguous date ranges are rejected by bills: {"date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by bills: {"date_from":"2023-02-29","date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by bills: {"date_from":"2024-02-30","date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by bills: {"date_from":"2024-02-29 00:00:00","date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by bills: {"date_from":"2024-02-2\u0000","date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by bills: {"date_from":["2024-02-29"],"date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by bills: {"date_from":"2024-02-29","date_to":false}
+PASS Invalid or ambiguous date ranges are rejected by bills: {"date_from":"2024-02-29","date_to":"2024-03-31","year":"2024"}
+PASS Invalid or ambiguous date ranges are rejected by bills: {"date_from":"2024-02-29","date_to":"2024-03-31","month":"2024-03"}
+PASS Invalid or ambiguous date ranges are rejected by payments: {"date_from":"2024-03-02","date_to":"2024-03-01"}
+PASS Invalid or ambiguous date ranges are rejected by payments: {"date_from":"2024-02-29"}
+PASS Invalid or ambiguous date ranges are rejected by payments: {"date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by payments: {"date_from":"2023-02-29","date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by payments: {"date_from":"2024-02-30","date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by payments: {"date_from":"2024-02-29 00:00:00","date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by payments: {"date_from":"2024-02-2\u0000","date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by payments: {"date_from":["2024-02-29"],"date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by payments: {"date_from":"2024-02-29","date_to":false}
+PASS Invalid or ambiguous date ranges are rejected by payments: {"date_from":"2024-02-29","date_to":"2024-03-31","year":"2024"}
+PASS Invalid or ambiguous date ranges are rejected by payments: {"date_from":"2024-02-29","date_to":"2024-03-31","month":"2024-03"}
+PASS Invalid or ambiguous date ranges are rejected by report: {"date_from":"2024-03-02","date_to":"2024-03-01"}
+PASS Invalid or ambiguous date ranges are rejected by report: {"date_from":"2024-02-29"}
+PASS Invalid or ambiguous date ranges are rejected by report: {"date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by report: {"date_from":"2023-02-29","date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by report: {"date_from":"2024-02-30","date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by report: {"date_from":"2024-02-29 00:00:00","date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by report: {"date_from":"2024-02-2\u0000","date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by report: {"date_from":["2024-02-29"],"date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by report: {"date_from":"2024-02-29","date_to":false}
+PASS Invalid or ambiguous date ranges are rejected by report: {"date_from":"2024-02-29","date_to":"2024-03-31","year":"2024"}
+PASS Invalid or ambiguous date ranges are rejected by report: {"date_from":"2024-02-29","date_to":"2024-03-31","month":"2024-03"}
+PASS Invalid or ambiguous date ranges are rejected by export: {"date_from":"2024-03-02","date_to":"2024-03-01"}
+PASS Invalid or ambiguous date ranges are rejected by export: {"date_from":"2024-02-29"}
+PASS Invalid or ambiguous date ranges are rejected by export: {"date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by export: {"date_from":"2023-02-29","date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by export: {"date_from":"2024-02-30","date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by export: {"date_from":"2024-02-29 00:00:00","date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by export: {"date_from":"2024-02-2\u0000","date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by export: {"date_from":["2024-02-29"],"date_to":"2024-03-31"}
+PASS Invalid or ambiguous date ranges are rejected by export: {"date_from":"2024-02-29","date_to":false}
+PASS Invalid or ambiguous date ranges are rejected by export: {"date_from":"2024-02-29","date_to":"2024-03-31","year":"2024"}
+PASS Invalid or ambiguous date ranges are rejected by export: {"date_from":"2024-02-29","date_to":"2024-03-31","month":"2024-03"}
+PASS Institution range scope is applied before pagination and totals even without an explicit institution filter
+PASS Payment calendar month and year filters preserve institution record isolation
+PASS Institution dashboard ranges disclose only assigned leads and billing totals
+PASS Institution range cannot request another institution through summary
+PASS Institution range cannot request another institution through deliveries
+PASS Institution range cannot request another institution through bills
+PASS Institution range cannot request another institution through payments
+PASS Institution range cannot request another institution through report
+PASS Institution range cannot request another institution through export
+PASS Institution Excel range exports retain record isolation
+PASS Unassigned institution accounts see no range totals or records
+PASS Reading date ranges leaves approved monthly billing snapshots unchanged: 2024-01
+PASS Reading date ranges leaves approved monthly billing snapshots unchanged: 2024-02
+PASS Reading date ranges leaves approved monthly billing snapshots unchanged: 2024-03
+PASS Reading date ranges leaves approved monthly billing snapshots unchanged: 2024-04
+PASS A general submission counts once for the site and once per recipient institution
+PASS Separate submissions with the same phone and email remain two site leads while billing duplication stays unchanged
+PASS Replaying a delivery source changes neither dashboard count
+PASS Unmapped and incomplete leads count for the site only; mapped live and historical deliveries count for recipients
+PASS Institution chart totals match recipient counts and exclude unmapped and incomplete records
+PASS A one-day range preserves source deduplication across recipients
+PASS Institution and month filters scope both counters before source deduplication
+PASS An empty calendar year clears both counters and the institution chart
+PASS Summary responses contain numeric counts without original source or contact identities
+PASS Source identity is deduplicated across summary query pages without dropping recipient deliveries
+PASS Older records use a positive shared contact ID when the source is absent and keep an unidentified row separate
+PASS Historical import counts a published general lead once for the site, twice for recipients and excludes a draft
+PASS Repeating historical import preserves both dashboard counts
+PASS Institution users count only their own completed deliveries and cannot infer unmapped or pending site submissions
+PASS Institution date ranges and explicit institution access preserve isolation for both counters
+PASS A user assigned two institutions sees one source submission and both authorized recipient deliveries
+PASS An unassigned user receives zero for every new lead count
+PASS Split lead count reporting leaves approved billing snapshots unchanged: 2024-01
+PASS Split lead count reporting leaves approved billing snapshots unchanged: 2024-02
+PASS Split lead count reporting leaves approved billing snapshots unchanged: 2024-03
+PASS Split lead count reporting leaves approved billing snapshots unchanged: 2024-04
+PASS Date range reports and isolated fixtures do not modify global CRM settings
+
+120 date range regression assertions passed.

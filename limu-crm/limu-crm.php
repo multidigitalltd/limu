@@ -2,7 +2,7 @@
 /**
  * Plugin Name: crm
  * Description: crm
- * Version: 0.1.7
+ * Version: 0.1.8
  * Requires at least: 6.6
  * Requires PHP: 7.4.33
  * License: GPL-2.0-or-later
@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 define( 'LIMU_CRM_FILE', __FILE__ );
-define( 'LIMU_CRM_VERSION', '0.1.7' );
+define( 'LIMU_CRM_VERSION', '0.1.8' );
 require_once __DIR__ . '/includes/assets.php';
 require_once __DIR__ . '/includes/domain.php';
 require_once __DIR__ . '/includes/store.php';
@@ -144,6 +144,18 @@ add_action(
 		header( "Content-Security-Policy: frame-ancestors 'self'", false );
 		header( 'Referrer-Policy: no-referrer' );
 		wp_enqueue_style( 'limu-crm', plugins_url( 'assets/' . ASSETS['crm.css'], LIMU_CRM_FILE ), array(), LIMU_CRM_VERSION );
+		$font_css = '';
+		$fonts    = array(
+			400 => 'ploni-medium.4e65b0770795.woff2',
+			700 => 'ploni-black.b4c9566317f1.woff2',
+		);
+		foreach ( $fonts as $weight => $font_file ) {
+			// Escape a quoted CSS URL, including markup delimiters, rather than HTML-encoding it.
+			$font_url  = esc_url_raw( plugins_url( 'assets/fonts/' . $font_file, LIMU_CRM_FILE ) );
+			$font_url  = str_replace( array( '\\', '"', '<', "\n", "\r", "\f" ), array( '\\\\', '\\"', '\\3c ', '\\a ', '\\d ', '\\c ' ), $font_url );
+			$font_css .= '@font-face{font-family:"CRM Ploni";font-style:normal;font-weight:' . $weight . ';font-display:swap;src:url("' . $font_url . '") format("woff2")}';
+		}
+		wp_add_inline_style( 'limu-crm', $font_css );
 		wp_enqueue_script(
 			'limu-crm-privacy',
 			plugins_url( 'assets/' . ASSETS['privacy.js'], LIMU_CRM_FILE ),

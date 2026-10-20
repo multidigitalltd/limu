@@ -1,5 +1,5 @@
-/* Read-only local REST regression. The actual 0.1.1 client is read from its published ZIP;
- * its settings POST is intercepted so the saved fixture configuration stays unchanged. */
+/* Local cache regression. The published 0.1.1 client may still read REST, while its
+ * retired global duplicate-policy write must fail closed without changing settings. */
 const { chromium } = require('playwright');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -42,7 +42,10 @@ const { execFileSync } = require('node:child_process');
   await page.getByLabel('סיסמה', {exact:true}).fill(credentials.password);
   await page.getByRole('button', {name:'כניסה למערכת'}).click();
   await page.getByRole('heading', {name:'סקירה כללית', exact:true}).waitFor();
-  await check(stableAliasHits === 0 && requestedAssets.some(asset => /\/crm\.[a-f0-9]{12}\.min\.js$/.test(asset)) && requestedAssets.every(asset => fingerprint.test(asset)), 'Current portal bypasses a stale stable asset even when the cache ignores query versions');
+  await check(stableAliasHits === 0 && requestedAssets.some(asset => /\/crm\.[a-f0-9]{12}\.min\.js$/.test(asset)) && requestedAssets.filter(asset => /\.(?:js|css)$/.test(asset)).every(asset => fingerprint.test(asset)), 'Current portal bypasses a stale stable asset even when the cache ignores query versions');
+  await page.evaluate(async()=>{await Promise.all([document.fonts.load('400 16px "CRM Ploni"'),document.fonts.load('700 16px "CRM Ploni"')]);});
+  const fontAssets=[...new Set(requestedAssets.filter(asset => /\.woff2$/.test(asset)))];
+  await check(requestedAssets.some(asset => /\/brand\/logo\.[a-f0-9]{12}\.png$/.test(asset)) && fontAssets.length === 2 && fontAssets.every(asset => /\/fonts\/ploni-(?:medium|black)\.[a-f0-9]{12}\.woff2$/.test(asset)), 'The original logo and both local font weights have immutable content fingerprints');
   await page.locator('[data-view="settings"]').click();
   await page.getByRole('heading', {name:'הגדרות והרשאות', exact:true}).waitFor();
   await check(await page.locator('#settings-form').isVisible() && await page.locator('#load-error').count() === 0 && await page.locator('#add-form').count() === 0 && errors.length === 0, 'Current settings load through actual REST without the retired mapping UI or JavaScript errors');
@@ -55,21 +58,23 @@ const { execFileSync } = require('node:child_process');
 
   const legacyPage = await context.newPage();
   const legacyErrors = [], actualGetEndpoints = new Set();
-  let legacyScriptHits = 0, legacyPayload, rewrittenDocument = false;
+  let legacyScriptHits = 0, legacyPayload, legacyStatus, rewrittenDocument = false;
   legacyPage.on('pageerror', error => legacyErrors.push(error.message));
   await legacyPage.route(legacyScriptUrl, route => {
    legacyScriptHits++;
    return route.fulfill({body:oldScript, contentType:'application/javascript'});
   });
-  await legacyPage.route('**/limu-crm/v1/**', route => {
+  await legacyPage.route('**/limu-crm/v1/**', async route => {
    const request = route.request();
    if (request.method() !== 'POST') {
     actualGetEndpoints.add(new URL(request.url()).pathname.split('/').at(-1));
     return route.continue();
    }
-   assert.equal(new URL(request.url()).pathname.split('/').at(-1), 'settings', 'Only the legacy settings write may be simulated');
+   assert.equal(new URL(request.url()).pathname.split('/').at(-1), 'settings', 'Only the legacy settings rejection may be exercised');
    legacyPayload = request.postDataJSON();
-   return route.fulfill({status:200, contentType:'application/json', body:JSON.stringify({saved:true})});
+   const response = await route.fetch();
+   legacyStatus = response.status();
+   return route.fulfill({response});
   });
   await legacyPage.route('**/crm/**', async route => {
    if (route.request().resourceType() !== 'document') return route.continue();
@@ -85,8 +90,9 @@ const { execFileSync } = require('node:child_process');
   await legacyPage.getByRole('heading', {name:'הגדרות והרשאות', exact:true}).waitFor();
   await check(rewrittenDocument && legacyScriptHits === 1 && actualGetEndpoints.has('bootstrap') && actualGetEndpoints.has('summary') && await legacyPage.locator('#settings-form').isVisible() && await legacyPage.locator('#load-error').count() === 0 && legacyErrors.length === 0, 'Published 0.1.1 JavaScript renders settings against actual current REST without the undefined-length failure');
   await legacyPage.getByRole('button', {name:'שמירת הגדרות', exact:true}).click();
-  await legacyPage.waitForFunction(() => document.getElementById('notification').textContent === 'הנתונים נשמרו');
-  await check(legacyPayload && Object.prototype.hasOwnProperty.call(legacyPayload, 'forms') && Array.isArray(legacyPayload.forms) && legacyPayload.forms.length === 0 && legacyPayload.duplicate_mode === actualSettings.duplicate_mode && legacyPayload.start_date === actualSettings.start_date && legacyPayload.automatic === actualSettings.automatic && await legacyPage.locator('#settings-form').isVisible() && legacyErrors.length === 0, 'Cached 0.1.1 client sends the compatible empty forms array and refreshes after its simulated save');
+  await legacyPage.waitForFunction(() => document.querySelector('#settings-form .form-error')?.textContent.length > 0);
+  const afterLegacySettings = await page.evaluate(async()=>{const response=await fetch(window.LimuCRM.api+'bootstrap',{headers:{'X-WP-Nonce':window.LimuCRM.nonce}});if(!response.ok)throw new Error('Settings comparison unavailable');return (await response.json()).settings;});
+  await check(legacyPayload && Object.prototype.hasOwnProperty.call(legacyPayload, 'forms') && Array.isArray(legacyPayload.forms) && legacyPayload.forms.length === 0 && legacyPayload.start_date === actualSettings.start_date && legacyPayload.automatic === actualSettings.automatic && legacyStatus === 409 && (await legacyPage.locator('#settings-form .form-error').textContent()).includes('לכל מוסד בנפרד') && (await legacyPage.locator('#notification').textContent()) !== 'הנתונים נשמרו' && JSON.stringify(afterLegacySettings) === JSON.stringify(actualSettings) && await legacyPage.locator('#settings-form').isVisible() && legacyErrors.length === 0, 'Cached global-policy clients receive a refresh error and cannot change current institution settings');
   await legacyPage.close();
   console.log(checks.length + ' cache and settings compatibility browser checks passed.');
  } finally {

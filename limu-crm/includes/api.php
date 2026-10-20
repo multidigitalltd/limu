@@ -45,7 +45,7 @@ add_action(
 				)
 			);
 		}
-		foreach ( array( 'settings', 'agreement', 'member', 'prepare', 'approve', 'payment', 'import', 'treatment', 'remap' ) as $route ) {
+		foreach ( array( 'settings', 'agreement', 'institution-policy', 'member', 'prepare', 'approve', 'payment', 'import', 'treatment', 'remap' ) as $route ) {
 			register_rest_route(
 				'limu-crm/v1',
 				'/' . $route,
@@ -96,8 +96,9 @@ function institution_list() {
 				'name' => get_the_title( $post->ID ),
 			);
 			if ( manager() ) {
-				$item['agreement']     = agreement( $post->ID );
-				$item['icount_client'] = icount_client( $post->ID );
+				$item['agreement']        = agreement( $post->ID );
+				$item['icount_client']    = icount_client( $post->ID );
+				$item['duplicate_policy'] = institution_policy( $post->ID );
 			}
 			return $item;
 		},
@@ -279,8 +280,7 @@ function write_api( $request ) {
 	if ( strlen( $request->get_body() ) > 131072 ) {
 		return error( 'הבקשה גדולה מדי.', 413 );
 	}
-	$input                  = $request->get_json_params();
-	$legacy_settings_client = is_array( $input ) && array_key_exists( 'forms', $input );
+	$input = $request->get_json_params();
 	if ( ! is_array( $input ) ) {
 		return error( 'בקשה לא תקינה.' );
 	}
@@ -317,34 +317,24 @@ function write_api( $request ) {
 		}
 	}
 	if ( 'settings' === $route ) {
-		$mode  = $input['duplicate_mode'] ?? '';
 		$start = $input['start_date'] ?? '';
-		if ( ! in_array( $mode, array( 'calendar', 'rolling', 'days_30', 'days_90', 'days_180', 'months_24', 'custom' ), true ) || ( '' !== $start && ! valid_date( $start ) ) ) {
+		if ( '' !== $start && ! valid_date( $start ) ) {
 			return error( 'הגדרות לא תקינות.' );
 		}
+		if ( array_key_exists( 'duplicate_mode', $input ) || array_key_exists( 'duplicate_days', $input ) ) {
+			return error( 'זיהוי כפילויות מוגדר כעת לכל מוסד בנפרד. יש לרענן את העמוד ולשמור מתוך כרטיס המוסד.', 409 );
+		}
 		$old = settings();
-		if ( ! empty( $legacy_settings_client ) && ! in_array( $old['duplicate_mode'], array( 'calendar', 'rolling' ), true ) && $mode !== $old['duplicate_mode'] ) {
-			return error( 'יש לרענן את העמוד לפני שמירת הגדרות הכפילות.', 409 );
-		}
-		if ( 'custom' === $mode && ! array_key_exists( 'duplicate_days', $input ) ) {
-			return error( 'יש לציין את מספר הימים למניעת כפילות.' );
-		}
-		$days = array_key_exists( 'duplicate_days', $input ) ? $input['duplicate_days'] : ( $old['duplicate_days'] ?? 30 );
-		if ( ( ! is_int( $days ) && ! is_string( $days ) ) || ! preg_match( '/^\d{1,4}$/D', (string) $days ) || (int) $days < 1 || (int) $days > 3650 ) {
-			return error( 'מספר הימים חייב להיות בין 1 ל־3650.' );
-		}
 		if ( '' !== $old['start_date'] && $old['start_date'] !== $start ) {
 			$q = query_records( 'lcrm_bill', array( 'state' => 'approved' ), 1, 1 );
 			if ( $q['total'] ) {
 				return error( 'תאריך תחילת החיוב נעול לאחר אישור חיובים.', 409 );
 			}
 		}
-		$new = array(
-			'duplicate_mode' => $mode,
-			'duplicate_days' => (int) $days,
-			'automatic'      => ! empty( $input['automatic'] ),
-			'start_date'     => $start,
-		);
+		// Retain retired global values for upgrade compatibility; captures never inherit them.
+		$new               = $old;
+		$new['automatic']  = ! empty( $input['automatic'] );
+		$new['start_date'] = $start;
 		update_option( 'lcrm_settings', $new, false );
 		if ( get_option( 'lcrm_settings' ) !== $new ) {
 			return error( 'שמירת ההגדרות נכשלה.', 500 );
@@ -353,12 +343,38 @@ function write_api( $request ) {
 			'settings_changed',
 			0,
 			array(
-				'duplicate_mode' => $mode,
-				'duplicate_days' => (int) $days,
-				'automatic'      => $new['automatic'],
+				'automatic' => $new['automatic'],
 			)
 		);
 		return $new;
+	}
+	if ( 'institution-policy' === $route ) {
+		if ( array_diff( array_keys( $input ), array( 'institution', 'duplicate_mode', 'duplicate_days' ) ) ) {
+			return error( 'שדה לא תקין.' );
+		}
+		$id   = absint( $input['institution'] ?? 0 );
+		$mode = $input['duplicate_mode'] ?? '';
+		if ( $id < 1 || 'institutions' !== get_post_type( $id ) || ! in_array( $mode, array( 'all_time', 'calendar', 'rolling', 'days_30', 'days_90', 'days_180', 'months_24', 'custom' ), true ) ) {
+			return error( 'מוסד או תקופת כפילות לא תקינים.' );
+		}
+		if ( 'custom' === $mode && ! array_key_exists( 'duplicate_days', $input ) ) {
+			return error( 'יש לציין את מספר הימים למניעת כפילות.' );
+		}
+		$days = array_key_exists( 'duplicate_days', $input ) ? $input['duplicate_days'] : institution_policy( $id )['duplicate_days'];
+		if ( ( ! is_int( $days ) && ! is_string( $days ) ) || ! preg_match( '/^\d{1,4}$/D', (string) $days ) || (int) $days < 1 || (int) $days > 3650 ) {
+			return error( 'מספר הימים חייב להיות בין 1 ל־3650.' );
+		}
+		$config                            = array(
+			'duplicate_mode' => $mode,
+			'duplicate_days' => (int) $days,
+		);
+		$GLOBALS['lcrm_changed_records'][] = $id;
+		update_post_meta( $id, '_lcrm_duplicate_policy', $config );
+		if ( get_post_meta( $id, '_lcrm_duplicate_policy', true ) !== $config ) {
+			return error( 'שמירת הגדרת הכפילות נכשלה.', 500 );
+		}
+		audit( 'institution_policy_changed', $id, $config );
+		return $config;
 	}
 	if ( 'agreement' === $route ) {
 		$id = absint( $input['institution'] ?? 0 );

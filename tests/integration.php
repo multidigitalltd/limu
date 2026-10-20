@@ -28,13 +28,15 @@ try {
  $b = wp_insert_post( array( 'post_type' => 'institutions', 'post_status' => 'publish', 'post_title' => 'מוסד ב' ) );
  $month = ( new DateTimeImmutable( 'now', wp_timezone() ) )->modify( 'first day of last month' )->format( 'Y-m' );
  $start = $month . '-01';
- check( 200 === request( 'settings', array( 'duplicate_mode' => 'calendar', 'start_date' => $start, 'automatic' => false ) )->get_status(), 'Settings saved' );
+ check( 200 === request( 'settings', array( 'start_date' => $start, 'automatic' => false ) )->get_status(), 'Billing settings saved independently of institution duplicate policies' );
  foreach ( array( $a => '50.00', $b => '75.00' ) as $id => $price ) {
   check( 200 === request( 'agreement', array( 'institution' => $id, 'price' => $price, 'from' => $start, 'credit_days' => '30' ) )->get_status(), 'Institution tariff saved without a per-institution VAT field' );
  }
  check( '0501234567' === LimuCRM\normalize_phone( '+972-50-123-4567' ), 'Israeli phone normalization' );
  check( 12345 === LimuCRM\money( '123.45' ) && null === LimuCRM\money( '1.005' ), 'Money uses exact agorot' );
- check( ! LimuCRM\same_contact( array( 'phone_key' => '', 'email_key' => '' ), array( 'phone_key' => '', 'email_key' => '' ) ), 'Empty contacts do not duplicate' );
+ $empty_identity = array( 'id' => 1, 'date' => $start . ' 00:00:00', 'phone_key' => '', 'email_key' => '' );
+ $empty_index = array( 'phone_key' => array( '' => array( $empty_identity ) ), 'email_key' => array( '' => array( $empty_identity ) ) );
+ check( array() === LimuCRM\duplicate_candidates( $empty_identity, $empty_index ), 'Empty contacts never match indexed candidates even if empty buckets exist' );
  check( ! LimuCRM\in_window( '2025-12-31', '2026-01-01', 'calendar' ) && LimuCRM\in_window( '2025-12-31', '2026-01-01', 'rolling' ), 'Calendar and rolling windows differ' );
  check( ! LimuCRM\in_window( '2025-01-01', '2026-01-01', 'rolling' ), 'Rolling window expires at anniversary' );
  $lead = array( 'name' => '<script>alert(1)</script> פונה', 'phone' => '0501234567', 'email' => 'one@example.test', 'form' => 'טופס כללי', 'date' => $month . '-05 10:00:00' );

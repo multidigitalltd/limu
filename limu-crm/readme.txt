@@ -2,7 +2,7 @@
 Contributors: multidigital
 Requires at least: 6.6
 Requires PHP: 7.4.33
-Stable tag: 0.1.7
+Stable tag: 0.1.8
 License: GPLv2 or later
 
 crm
@@ -10,7 +10,7 @@ crm
 == Installation ==
 Install on staging first. Activate and open /crm/ with an administrator account.
 Requires MySQL/MariaDB InnoDB transactions and advisory locks; PHP ZipArchive for XLSX.
-Configure institution rates, billing start date and members. Existing site leads sync automatically. VAT is fixed at 18%.
+Configure institution rates, billing start date, duplicate periods and members. Each institution has its own duplicate period; the default is all history, without a year limit. Existing site leads sync automatically. VAT is fixed at 18%.
 Exclude /crm/ and /wp-json/limu-crm/v1/* from public page caching.
 
 == Important ==
