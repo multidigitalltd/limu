@@ -17,6 +17,7 @@ await build({
   outdir: assets,
   entryNames: '[name].min',
   minify: true,
+  charset: 'utf8',
   logLevel: 'info',
 });
 

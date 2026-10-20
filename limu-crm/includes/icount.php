@@ -222,10 +222,29 @@ function icount_link_client( $institution, $client_id ) {
 /**
  * Read all fiscal operations for one approved billing snapshot.
  *
- * @param int $bill Bill post ID.
+ * @param int  $bill Bill post ID.
+ * @param bool $fresh Whether the transaction requires an authoritative database read.
  * @return array Private outbox; never included in REST responses.
+ * @throws \RuntimeException When an authoritative outbox cannot be verified.
  */
-function icount_outbox( $bill ) {
+function icount_outbox( $bill, $fresh = false ) {
+	if ( $fresh ) {
+		global $wpdb;
+		$queries = $wpdb->num_queries;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery -- Financial intent mutations must not reuse pre-HTTP object-cache values.
+		$rows = $wpdb->get_col( $wpdb->prepare( "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s", $bill, '_lcrm_icount' ) );
+		if ( $wpdb->num_queries <= $queries || $wpdb->last_error || ! is_array( $rows ) || count( $rows ) > 1 ) {
+			throw new \RuntimeException( 'Accounting outbox lookup failed.' );
+		}
+		if ( ! $rows ) {
+			return array();
+		}
+		$value = maybe_unserialize( $rows[0] );
+		if ( ! is_array( $value ) ) {
+			throw new \RuntimeException( 'Accounting outbox snapshot is invalid.' );
+		}
+		return $value;
+	}
 	$value = get_post_meta( $bill, '_lcrm_icount', true );
 	return is_array( $value ) ? $value : array();
 }
@@ -239,7 +258,7 @@ function icount_outbox( $bill ) {
 function icount_save_outbox( $bill, $outbox ) {
 	$GLOBALS['lcrm_changed_records'][] = $bill;
 	update_post_meta( $bill, '_lcrm_icount', wp_slash( $outbox ) );
-	return get_post_meta( $bill, '_lcrm_icount', true ) === $outbox ? true : error( 'לא ניתן לשמור את מצב מסמך iCount.', 500 );
+	return icount_outbox( $bill, true ) === $outbox ? true : error( 'לא ניתן לשמור את מצב מסמך iCount.', 500 );
 }
 /**
  * Strip private payloads, idempotency keys and account fingerprints from an operation.
@@ -348,13 +367,16 @@ function icount_payment_payload( $payment, $details ) {
 function icount_reserve( $bill_id, $kind, $payment_id = 0, $details = array() ) {
 	return locked(
 		static function () use ( $bill_id, $kind, $payment_id, $details ) {
-			$bill   = data( $bill_id );
+			if ( 'lcrm_bill' !== get_post_type( $bill_id ) ) {
+				return error( 'להפקה דרושים חיוב מאושר, חיבור מאומת וקישור המוסד ללקוח iCount.', 409 );
+			}
+			$bill   = raw_records( array( $bill_id ) )[0];
 			$status = icount_status();
 			$client = icount_client( $bill['institution'] ?? 0 );
 			if ( 'lcrm_bill' !== get_post_type( $bill_id ) || 'approved' !== ( $bill['state'] ?? '' ) || ! $status['verified'] || ! $client ) {
 				return error( 'להפקה דרושים חיוב מאושר, חיבור מאומת וקישור המוסד ללקוח iCount.', 409 );
 			}
-			$outbox = icount_outbox( $bill_id );
+			$outbox = icount_outbox( $bill_id, true );
 			$key    = $payment_id ? 'payment:' . $payment_id : $kind;
 			if ( isset( $outbox[ $key ] ) ) {
 				return 'issued' === $outbox[ $key ]['state'] ? $outbox[ $key ] : error( 'הפקה זו כבר נשלחה. יש לבדוק את מצב המסמך לפני ניסיון נוסף.', 409 );
@@ -377,8 +399,11 @@ function icount_reserve( $bill_id, $kind, $payment_id = 0, $details = array() ) 
 			$payment_payload = array();
 			$payment         = array();
 			if ( $payment_id ) {
-				$payment = data( $payment_id );
-				if ( 'lcrm_payment' !== get_post_type( $payment_id ) || (int) ( $payment['bill'] ?? 0 ) !== $bill_id ) {
+				if ( 'lcrm_payment' !== get_post_type( $payment_id ) ) {
+					return error( 'התשלום אינו שייך לחיוב שנבחר.' );
+				}
+				$payment = raw_records( array( $payment_id ) )[0];
+				if ( (int) ( $payment['bill'] ?? 0 ) !== $bill_id ) {
 					return error( 'התשלום אינו שייך לחיוב שנבחר.' );
 				}
 				$payment_payload = icount_payment_payload( $payment, $details );
@@ -656,7 +681,7 @@ function icount_send( $bill_id, $operation, $recover = false ) {
 	$state  = is_wp_error( $valid ) ? 'unknown' : 'issued';
 	$saved  = locked(
 		static function () use ( $bill_id, $operation, $state, $docnum, $result, $valid ) {
-			$outbox  = icount_outbox( $bill_id );
+			$outbox  = icount_outbox( $bill_id, true );
 			$current = $outbox[ $operation['key'] ] ?? null;
 			if ( ! $current || $current['payload'] !== $operation['payload'] || ! hash_equals( $current['account'], $operation['account'] ) ) {
 				return error( 'מצב ההפקה השתנה. יש לבדוק את המסמך ב־iCount.', 409 );
@@ -677,7 +702,7 @@ function icount_send( $bill_id, $operation, $recover = false ) {
 				return $outcome;
 			}
 			if ( 'issued' === $state && in_array( $current['doctype'], array( 'deal', 'invoice' ), true ) ) {
-				$bill                   = data( $bill_id );
+				$bill                   = raw_records( array( $bill_id ) )[0];
 				$bill['document_state'] = 'issued';
 				$bill['issued']         = ! empty( $current['credit_anchor'] ) ? $current['credit_anchor'] : $current['issued'];
 				$bill['due']            = $current['paydate'];
@@ -765,7 +790,7 @@ function icount_reconcile( $target, $doctype, $docnum = 0 ) {
 	$key     = $payment ? 'payment:' . $target : $doctype;
 	$result  = locked(
 		static function () use ( $bill_id, $key, $doctype, $docnum ) {
-			$outbox    = icount_outbox( $bill_id );
+			$outbox    = icount_outbox( $bill_id, true );
 			$operation = $outbox[ $key ] ?? null;
 			if ( ! $operation || $doctype !== $operation['doctype'] || ! hash_equals( $operation['account'], icount_account() ) || ( $docnum && (int) $operation['docnum'] !== $docnum ) ) {
 				return error( 'אין פעולת הפקה תואמת לבירור.', 409 );

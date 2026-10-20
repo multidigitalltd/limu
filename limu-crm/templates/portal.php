@@ -11,7 +11,10 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 ?><!doctype html>
-<html lang="he" dir="rtl"><head><meta charset="<?php echo esc_attr( get_bloginfo( 'charset' ) ); ?>"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CRM — ניהול מוסדות ולידים</title><?php wp_print_styles( array( 'limu-crm' ) ); ?></head>
+<html lang="he" dir="rtl"><head><meta charset="<?php echo esc_attr( get_bloginfo( 'charset' ) ); ?>"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CRM — ניהול מוסדות ולידים</title><?php wp_print_styles( array( 'limu-crm' ) ); ?>
+<style nonce="<?php echo esc_attr( portal_nonce() ); ?>">
+<?php echo $font_css; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Static font rules with CSS-escaped URLs assembled by the portal controller. ?>
+</style></head>
 <body class="lcrm"><a class="skip-link" href="#main">דילוג לתוכן</a>
 <?php if ( ! is_user_logged_in() ) : ?>
 <main id="main" class="login-shell">

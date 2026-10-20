@@ -125,6 +125,46 @@ try {
  icount_check( ! isset( $receipt_payload['items'] ) && '20.00' === $receipt_payload['banktransfer']['sum'] && 7 === $receipt_payload['banktransfer']['account'] && $invoice->get_data()['docnum'] === $receipt_payload['based_on'][0]['docnum'], 'Receipt carries actual payment, receiving bank ID and invoice link without taxing again' );
  $rest = icount_fixture_payment( $bill['id'], '39.00' );
  icount_check( 'receipt' === LimuCRM\icount_issue_payment( $rest['id'] )['doctype'], 'Final payment after partial receipt creates another receipt without another tax invoice' );
+ $race_bill = icount_fixture_bill( $institution );
+ $nest = function () use ( $race_bill ) {
+  $old_cache = get_post_meta( $race_bill['id'] );
+  $payment = icount_fixture_payment( $race_bill['id'], '10.00' );
+  icount_check( ! is_wp_error( $payment ), 'Another payment can commit while the accounting HTTP request is in flight' );
+  // A different PHP worker cannot clear the in-flight request's nonpersistent metadata cache.
+  wp_cache_set( $race_bill['id'], $old_cache, 'post_meta' );
+ };
+ $race_invoice = LimuCRM\icount_issue_bill( $race_bill['id'], 'invoice' );
+ $race_snapshot = LimuCRM\raw_records( array( $race_bill['id'] ) )[0];
+ icount_check( ! is_wp_error( $race_invoice ) && 1000 === $race_snapshot['paid'] && 'issued' === $race_snapshot['document_state'], 'Invoice finalization preserves a payment committed during HTTP despite stale request metadata' );
+ $parallel_bill = icount_fixture_bill( $institution );
+ LimuCRM\icount_issue_bill( $parallel_bill['id'], 'invoice' );
+ $parallel_a = icount_fixture_payment( $parallel_bill['id'], '1.00' );
+ $parallel_b = icount_fixture_payment( $parallel_bill['id'], '2.00' );
+ $parallel_reserved = null;
+ $nest = function () use ( $parallel_bill, $parallel_b, &$parallel_reserved ) {
+  $old_cache = get_post_meta( $parallel_bill['id'] );
+  $parallel_reserved = LimuCRM\icount_reserve( $parallel_bill['id'], 'receipt', $parallel_b['id'] );
+  icount_check( ! is_wp_error( $parallel_reserved ), 'A separate recorded payment can reserve its receipt during the first receipt HTTP request' );
+  wp_cache_set( $parallel_bill['id'], $old_cache, 'post_meta' );
+ };
+ $parallel_receipt = LimuCRM\icount_issue_payment( $parallel_a['id'] );
+ $parallel_outbox = LimuCRM\icount_outbox( $parallel_bill['id'], true );
+ icount_check( ! is_wp_error( $parallel_receipt ) && 'issued' === $parallel_outbox[ 'payment:' . $parallel_a['id'] ]['state'] && $parallel_reserved === $parallel_outbox[ 'payment:' . $parallel_b['id'] ], 'Receipt finalization preserves another committed fiscal reservation instead of replacing its outbox' );
+ $before = count( $calls );
+ icount_check( is_wp_error( LimuCRM\icount_issue_payment( $parallel_b['id'] ) ) && $before === count( $calls ), 'Preserved sending reservation blocks a second receipt request before HTTP' );
+ $outbox_fault_bill = icount_fixture_bill( $institution );
+ $outbox_fault = function ( $query ) use ( $outbox_fault_bill ) {
+  global $wpdb;
+  if ( 0 === strpos( $query, 'SELECT meta_value FROM ' . $wpdb->postmeta ) && false !== strpos( $query, "post_id = " . $outbox_fault_bill['id'] ) && false !== strpos( $query, "'_lcrm_icount'" ) ) {
+   return 'SELECT lcrm_missing_outbox_column FROM ' . $wpdb->postmeta . ' LIMIT 1';
+  }
+  return $query;
+ };
+ $before = count( $calls ); $old_suppress = $wpdb->suppress_errors( true );
+ add_filter( 'query', $outbox_fault );
+ try { $outbox_failure = LimuCRM\icount_issue_bill( $outbox_fault_bill['id'], 'deal' ); }
+ finally { remove_filter( 'query', $outbox_fault ); $wpdb->suppress_errors( $old_suppress ); }
+ icount_check( is_wp_error( $outbox_failure ) && $before === count( $calls ) && array() === LimuCRM\icount_outbox( $outbox_fault_bill['id'], true ), 'Failed authoritative outbox read cannot reuse cached emptiness or issue a financial document' );
  $anchor_bill = icount_fixture_bill( $institution ); $anchor_demand = LimuCRM\icount_issue_bill( $anchor_bill['id'], 'deal' );
  $anchor_date = ( new DateTimeImmutable( 'now', wp_timezone() ) )->modify( '-10 days' )->format( 'Y-m-d' );
  $anchor_outbox = LimuCRM\icount_outbox( $anchor_bill['id'] ); $anchor_outbox['deal']['issued'] = $anchor_date; $anchor_outbox['deal']['paydate'] = LimuCRM\due_date( $anchor_date, 30 );

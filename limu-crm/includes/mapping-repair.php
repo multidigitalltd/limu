@@ -75,7 +75,7 @@ function mapping_repair_matches( $existing, $item ) {
 			return false;
 		}
 	}
-	foreach ( array( 'notes', 'treatment' ) as $key ) {
+	foreach ( array( 'notes', 'treatment', 'billing_excluded', 'billing_excluded_by', 'billing_excluded_at' ) as $key ) {
 		if ( isset( $item[ $key ] ) && ( $existing[ $key ] ?? null ) !== $item[ $key ] ) {
 			return false;
 		}
@@ -191,7 +191,7 @@ function mapping_repair_item( $id, $catalog ) {
 				return error( 'מקבל קיים אינו תואם למקור ההיסטורי.', 409 );
 			}
 		}
-		foreach ( array( 'duplicate_mode', 'notes', 'treatment' ) as $key ) {
+		foreach ( array( 'duplicate_mode', 'notes', 'treatment', 'billing_excluded', 'billing_excluded_by', 'billing_excluded_at' ) as $key ) {
 			if ( array_key_exists( $key, $item ) ) {
 				$stored[ $key ] = $item[ $key ];
 			} else {

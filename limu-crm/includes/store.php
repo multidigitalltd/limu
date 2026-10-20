@@ -140,6 +140,37 @@ function data( $id ) {
 }
 
 /**
+ * Verify transactional storage once per database/prefix for the current PHP request.
+ * Failed checks are never cached and never permit the mutation callback to run.
+ *
+ * @return true|\WP_Error Whether all four mutable WordPress tables use InnoDB.
+ */
+function ensure_transactional_tables() {
+	global $wpdb;
+	$key = DB_NAME . ':' . $wpdb->prefix;
+	if ( ! empty( $GLOBALS['lcrm_transactional_tables'][ $key ] ) ) {
+		return true;
+	}
+	$required = array( $wpdb->posts, $wpdb->postmeta, $wpdb->options, $wpdb->usermeta );
+	$queries  = $wpdb->num_queries;
+	$tables   = $wpdb->get_results( $wpdb->prepare( 'SELECT TABLE_NAME, ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = %s AND TABLE_NAME IN (%s, %s, %s, %s)', DB_NAME, $wpdb->posts, $wpdb->postmeta, $wpdb->options, $wpdb->usermeta ), ARRAY_A );
+	if ( $wpdb->num_queries <= $queries || $wpdb->last_error || ! is_array( $tables ) || 4 !== count( $tables ) ) {
+		return error( 'שמירה מאובטחת דורשת טבלאות InnoDB. יש לפנות למנהל האתר.', 503 );
+	}
+	$verified = array();
+	foreach ( $tables as $table ) {
+		if ( ! isset( $table['TABLE_NAME'], $table['ENGINE'] ) || ! is_string( $table['ENGINE'] ) || ! in_array( $table['TABLE_NAME'], $required, true ) || 'INNODB' !== strtoupper( $table['ENGINE'] ) ) {
+			return error( 'שמירה מאובטחת דורשת טבלאות InnoDB. יש לפנות למנהל האתר.', 503 );
+		}
+		$verified[ $table['TABLE_NAME'] ] = true;
+	}
+	if ( 4 !== count( $verified ) ) {
+		return error( 'שמירה מאובטחת דורשת טבלאות InnoDB. יש לפנות למנהל האתר.', 503 );
+	}
+	$GLOBALS['lcrm_transactional_tables'][ $key ] = true;
+	return true;
+}
+/**
  * All mutations share a database advisory lock, including parallel REST and cron workers.
  *
  * @param callable $callback Mutation executed under lock or savepoint.
@@ -154,10 +185,12 @@ function locked( $callback ) {
 	if ( '1' !== (string) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, %d)', $name, 5 ) ) ) {
 		return error( 'המערכת עסוקה. נסו שוב בעוד רגע.', 409 );
 	}
+	$committed   = false;
+	$changed_ids = array();
 	try {
-		$tables = $wpdb->get_results( $wpdb->prepare( 'SELECT TABLE_NAME, ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = %s AND TABLE_NAME IN (%s, %s, %s, %s)', DB_NAME, $wpdb->posts, $wpdb->postmeta, $wpdb->options, $wpdb->usermeta ), ARRAY_A );
-		if ( 4 !== count( $tables ) || array_filter( $tables, static fn( $table ) => 'INNODB' !== strtoupper( $table['ENGINE'] ) ) ) {
-			return error( 'שמירה מאובטחת דורשת טבלאות InnoDB. יש לפנות למנהל האתר.', 503 );
+		$capability = ensure_transactional_tables();
+		if ( is_wp_error( $capability ) ) {
+			return $capability;
 		}
 		if ( false === $wpdb->query( 'START TRANSACTION' ) ) {
 			return error( 'לא ניתן להתחיל שמירה. יש לנסות שוב.', 503 );
@@ -172,16 +205,82 @@ function locked( $callback ) {
 			$wpdb->query( 'ROLLBACK' );
 			rollback_caches();
 			$result = error( 'הפעולה לא נשמרה. יש לנסות שוב.', 500 );
+		} else {
+			$committed   = true;
+			$changed_ids = array_values( array_unique( $GLOBALS['lcrm_changed_records'] ?? array() ) );
 		}
-		return $result;
 	} catch ( \Throwable $exception ) {
 		$wpdb->query( 'ROLLBACK' );
 		rollback_caches();
-		return error( 'הפעולה לא נשמרה. יש לנסות שוב.', 500 );
+		$result = error( 'הפעולה לא נשמרה. יש לנסות שוב.', 500 );
 	} finally {
 		unset( $GLOBALS['lcrm_changed_records'], $GLOBALS['lcrm_changed_users'] );
 		$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $name ) );
 	}
+	if ( $committed ) {
+		try {
+			/** Invalidate derived state only after commit; IDs remain available after transaction cleanup. */
+			do_action( 'lcrm_committed', $changed_ids );
+		} catch ( \Throwable $exception ) {
+			// The mutation has committed and must never be reported as rolled back.
+			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Static operational diagnostic contains no user data or exception details.
+			error_log( 'CRM: post-commit notification failed.' );
+		}
+	}
+	return $result;
+}
+/**
+ * Read authorized private-record snapshots directly from committed database metadata.
+ * No contact hydration or object-cache values are used for financial guards or totals.
+ *
+ * @param array $ids IDs already selected by a scoped query.
+ * @return array Snapshots in the caller's original ID order.
+ * @throws \RuntimeException When a snapshot is missing, malformed or cannot be read.
+ */
+function raw_records( $ids ) {
+	global $wpdb;
+	if ( ! $ids ) {
+		return array();
+	}
+	if ( count( $ids ) > 5000 ) {
+		throw new \RuntimeException( 'Private record batch exceeds its bound.' );
+	}
+	foreach ( $ids as $id ) {
+		if ( ( ! is_int( $id ) && ! is_string( $id ) ) || ! preg_match( '/^[1-9]\d*$/D', (string) $id ) ) {
+			throw new \RuntimeException( 'Invalid private record ID.' );
+		}
+	}
+	$records = array();
+	foreach ( array_chunk( array_unique( array_map( 'intval', $ids ) ), 500 ) as $batch ) {
+		$placeholders = implode( ', ', array_fill( 0, count( $batch ), '%d' ) );
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Placeholders are generated internally and every ID is passed through prepare().
+		$sql     = $wpdb->prepare( "SELECT post_id, meta_value FROM {$wpdb->postmeta} WHERE meta_key = %s AND post_id IN ($placeholders)", array_merge( array( '_lcrm_data' ), $batch ) );
+		$queries = $wpdb->num_queries;
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Prepared immediately above with bounded numeric IDs.
+		$rows = $wpdb->get_results( $sql, ARRAY_A );
+		if ( $wpdb->num_queries <= $queries || $wpdb->last_error || ! is_array( $rows ) ) {
+			throw new \RuntimeException( 'Private record snapshot lookup failed.' );
+		}
+		foreach ( $rows as $row ) {
+			$id   = isset( $row['post_id'] ) ? (int) $row['post_id'] : 0;
+			$item = isset( $row['meta_value'] ) ? maybe_unserialize( $row['meta_value'] ) : null;
+			if ( ! in_array( $id, $batch, true ) || isset( $records[ $id ] ) || ! is_array( $item ) || ! isset( $item['id'] ) || ( ! is_int( $item['id'] ) && ! is_string( $item['id'] ) ) || (string) $id !== (string) $item['id'] ) {
+				throw new \RuntimeException( 'Invalid private record snapshot.' );
+			}
+			$records[ $id ] = $item;
+		}
+		foreach ( $batch as $id ) {
+			if ( ! isset( $records[ $id ] ) ) {
+				throw new \RuntimeException( 'Private record snapshot is missing.' );
+			}
+		}
+	}
+	return array_map(
+		static function ( $id ) use ( $records ) {
+			return $records[ (int) $id ];
+		},
+		$ids
+	);
 }
 /**
  * Store structured payloads in private WordPress records with separate indexed query metadata.
@@ -192,10 +291,24 @@ function locked( $callback ) {
  * @return mixed Operation result or validation error.
  */
 function save_record( $type, $payload, $id = 0 ) {
+	if ( 'lcrm_delivery' === $type && array_key_exists( 'billing_excluded', $payload ) && ! is_bool( $payload['billing_excluded'] ) ) {
+		return error( 'מצב החרגה מחיוב לא תקין.', 500 );
+	}
+	if ( 'lcrm_delivery' === $type ) {
+		foreach ( array(
+			'phone_key' => 'normalize_phone',
+			'email_key' => 'normalize_email',
+		) as $key => $normalizer ) {
+			$value = array_key_exists( $key, $payload ) ? $payload[ $key ] : '';
+			if ( ! is_string( $value ) || ( '' !== $value && call_user_func( __NAMESPACE__ . '\\' . $normalizer, $value ) !== $value ) ) {
+				return error( 'מפתח זיהוי פנייה לא תקין.', 500 );
+			}
+		}
+	}
 	$post = array(
 		'post_type'   => $type,
 		'post_status' => 'private',
-		'post_title'  => 'lcrm_delivery' === $type ? ( $payload['name'] ?? 'פנייה' ) : $type,
+		'post_title'  => 'lcrm_delivery' === $type ? ( $payload['name'] ?? ( $id ? get_post_field( 'post_title', $id, 'raw' ) : 'פנייה' ) ) : $type,
 		'post_author' => get_current_user_id(),
 	);
 	if ( $id ) {
@@ -213,12 +326,19 @@ function save_record( $type, $payload, $id = 0 ) {
 	}
 	$payload['id'] = $saved;
 	update_post_meta( $saved, '_lcrm_data', wp_slash( $payload ) );
-	foreach ( array( 'institution', 'month', 'state', 'source', 'date', 'bill' ) as $key ) {
-		if ( isset( $payload[ $key ] ) ) {
-			update_post_meta( $saved, '_lcrm_' . $key, wp_slash( $payload[ $key ] ) );
-			if ( (string) get_post_meta( $saved, '_lcrm_' . $key, true ) !== (string) $payload[ $key ] ) {
-				return error( 'שמירת אינדקס הרשומה נכשלה.', 500 );
-			}
+	foreach ( array( 'institution', 'month', 'state', 'source', 'date', 'bill', 'billing_excluded', 'phone_key', 'email_key' ) as $key ) {
+		if ( 'billing_excluded' === $key && 'lcrm_delivery' === $type ) {
+			$value = (int) ( $payload['billing_excluded'] ?? false );
+		} elseif ( in_array( $key, array( 'phone_key', 'email_key' ), true ) && 'lcrm_delivery' === $type ) {
+			$value = $payload[ $key ] ?? '';
+		} elseif ( isset( $payload[ $key ] ) ) {
+			$value = $payload[ $key ];
+		} else {
+			continue;
+		}
+		update_post_meta( $saved, '_lcrm_' . $key, wp_slash( $value ) );
+		if ( (string) get_post_meta( $saved, '_lcrm_' . $key, true ) !== (string) $value ) {
+			return error( 'שמירת אינדקס הרשומה נכשלה.', 500 );
 		}
 	}
 	if ( get_post_meta( $saved, '_lcrm_data', true ) !== $payload ) {
@@ -284,6 +404,11 @@ function query_records( $type, $filters = array(), $page = 1, $limit = 30, $sear
 				'value'   => array( 'sent', 'historical' ),
 				'compare' => 'IN',
 			);
+		} elseif ( 'lcrm_bill' === $type ) {
+			$meta[] = array(
+				'key'   => '_lcrm_state',
+				'value' => 'approved',
+			);
 		}
 	}
 	if ( isset( $filters['date_from'], $filters['date_to'] ) ) {
@@ -306,6 +431,13 @@ function query_records( $type, $filters = array(), $page = 1, $limit = 30, $sear
 			continue;
 		}
 		if ( '' !== $value && null !== $value ) {
+			if ( 'billing_status' === $key ) {
+				$meta[] = array(
+					'key'   => '_lcrm_billing_excluded',
+					'value' => 'excluded' === $value && 'lcrm_delivery' === $type ? '1' : 'invalid',
+				);
+				continue;
+			}
 			if ( 'lcrm_payment' === $type && in_array( $key, array( 'month', 'year' ), true ) ) {
 				$first  = 'year' === $key ? $value . '-01-01' : $value . '-01';
 				$last   = 'year' === $key ? $value . '-12-31' : ( new \DateTimeImmutable( $first, wp_timezone() ) )->format( 'Y-m-t' );
@@ -333,32 +465,34 @@ function query_records( $type, $filters = array(), $page = 1, $limit = 30, $sear
 	}
 	$q = new \WP_Query(
 		array(
-			'post_type'      => $type,
-			'post_status'    => 'private',
-			'posts_per_page' => min( 5000, max( 1, $limit ) ),
-			'paged'          => max( 1, $page ),
-			's'              => $search,
-			'meta_query'     => $meta,
-			'orderby'        => 'ID',
-			'order'          => 'DESC',
+			'post_type'              => $type,
+			'post_status'            => 'private',
+			'posts_per_page'         => min( 5000, max( 1, $limit ) ),
+			'paged'                  => max( 1, $page ),
+			's'                      => $search,
+			'meta_query'             => $meta,
+			'orderby'                => 'ID',
+			'order'                  => 'DESC',
+			'cache_results'          => $hydrate,
+			'update_post_meta_cache' => $hydrate,
+			'update_post_term_cache' => $hydrate,
 			// Summary callers retain the first page's total; later batches do not need another count query.
-			'no_found_rows'  => ! $hydrate && $page > 1,
+			'no_found_rows'          => ! $hydrate && $page > 1,
 		)
 	);
 	if ( $hydrate ) {
 		prime_contacts( wp_list_pluck( $q->posts, 'ID' ) );
-	}
-	return array(
-		'items' => array_map(
-			function ( $post ) use ( $hydrate ) {
-				if ( $hydrate ) {
-					return data( $post->ID );
-				}
-				$item = get_post_meta( $post->ID, '_lcrm_data', true );
-				return is_array( $item ) ? $item : array();
+		$items = array_map(
+			static function ( $post ) {
+				return data( $post->ID );
 			},
 			$q->posts
-		),
+		);
+	} else {
+		$items = raw_records( wp_list_pluck( $q->posts, 'ID' ) );
+	}
+	return array(
+		'items' => $items,
 		'total' => (int) $q->found_posts,
 		'pages' => (int) $q->max_num_pages,
 	);
@@ -371,8 +505,10 @@ function query_records( $type, $filters = array(), $page = 1, $limit = 30, $sear
  * @param int|string|null $after Cursor or lower timestamp bound.
  * @param bool            $hydrate Whether contact details are needed by the caller.
  * @return mixed Operation result or validation error.
+ * @throws \RuntimeException When an authoritative delivery lookup fails.
  */
 function institution_deliveries( $id, $before = null, $after = null, $hydrate = true ) {
+	global $wpdb;
 	$meta = array(
 		array(
 			'key'   => '_lcrm_institution',
@@ -394,28 +530,35 @@ function institution_deliveries( $id, $before = null, $after = null, $hydrate = 
 			'compare' => '>=',
 		);
 	}
-	$ids = get_posts(
+	$queries = $wpdb->num_queries;
+	$ids     = get_posts(
 		array(
-			'post_type'      => 'lcrm_delivery',
-			'post_status'    => 'private',
-			'posts_per_page' => -1,
-			'fields'         => 'ids',
-			'meta_query'     => $meta,
-			'orderby'        => 'ID',
-			'order'          => 'ASC',
+			'post_type'              => 'lcrm_delivery',
+			'post_status'            => 'private',
+			'posts_per_page'         => -1,
+			'fields'                 => 'ids',
+			'meta_query'             => $meta,
+			'orderby'                => 'ID',
+			'order'                  => 'ASC',
+			'cache_results'          => $hydrate,
+			'update_post_meta_cache' => $hydrate,
+			'update_post_term_cache' => $hydrate,
 		)
 	);
-	update_meta_cache( 'post', $ids );
+	if ( ! $hydrate && ( $wpdb->num_queries <= $queries || $wpdb->last_error ) ) {
+		throw new \RuntimeException( 'Institution delivery lookup failed.' );
+	}
 	if ( $hydrate ) {
+		update_meta_cache( 'post', $ids );
 		prime_contacts( $ids );
 		$items = array_map( __NAMESPACE__ . '\\data', $ids );
 	} else {
-		$items = array_map(
-			static function ( $record_id ) {
-				return get_post_meta( $record_id, '_lcrm_data', true );
-			},
-			$ids
-		);
+		$items = array();
+		foreach ( array_chunk( $ids, 5000 ) as $batch ) {
+			foreach ( raw_records( $batch ) as $item ) {
+				$items[] = $item;
+			}
+		}
 	}
 	usort(
 		$items,
@@ -550,10 +693,15 @@ function record_delivery( $lead, $institution, $source, $historical = false, $sa
  * @param int    $id WordPress object ID.
  * @param string $month Completed service month in YYYY-MM format.
  * @return mixed Operation result or validation error.
+ * @throws \RuntimeException When the billing lookup or frozen snapshot cannot be verified.
  */
 function bill_for( $id, $month ) {
-	$ids = get_posts(
+	global $wpdb;
+	$queries = $wpdb->num_queries;
+	$ids     = get_posts(
 		array(
+			// Financial guards must not reuse a cached empty result from a failed database lookup.
+			'cache_results'  => false,
 			'post_type'      => 'lcrm_bill',
 			'post_status'    => 'private',
 			'posts_per_page' => 1,
@@ -571,7 +719,18 @@ function bill_for( $id, $month ) {
 			),
 		)
 	);
-	return $ids ? data( $ids[0] ) : null;
+	if ( $wpdb->num_queries <= $queries || $wpdb->last_error ) {
+		throw new \RuntimeException( 'Billing period lookup failed.' );
+	}
+	if ( ! $ids ) {
+		return null;
+	}
+	$items = raw_records( $ids );
+	$bill  = $items[0];
+	if ( ! isset( $bill['state'], $bill['institution'], $bill['month'] ) || ! in_array( $bill['state'], array( 'draft', 'approved' ), true ) || ( ! is_int( $bill['institution'] ) && ! is_string( $bill['institution'] ) ) || (string) $id !== (string) $bill['institution'] || $month !== $bill['month'] ) {
+		throw new \RuntimeException( 'Billing period snapshot is invalid.' );
+	}
+	return $bill;
 }
 /**
  * Draft totals are calculated again at approval. Approved snapshots are immutable.
@@ -598,7 +757,7 @@ function prepare_bill( $id, $month ) {
 	if ( substr( $end, 0, 10 ) < $s['start_date'] ) {
 		return error( 'התקופה קודמת לתחילת החיוב.' );
 	}
-	$items      = institution_deliveries( $id, $end, $first );
+	$items      = institution_deliveries( $id, $end, $first, false );
 	$lines      = array();
 	$subtotal   = 0;
 	$vat        = 0;
@@ -611,6 +770,9 @@ function prepare_bill( $id, $month ) {
 		}
 		if ( 'sent' !== $item['state'] ) {
 			++$historical;
+			continue;
+		}
+		if ( ! empty( $item['billing_excluded'] ) ) {
 			continue;
 		}
 		if ( substr( $item['date'], 0, 10 ) < $s['start_date'] ) {
@@ -664,7 +826,7 @@ function approve_bill( $id ) {
 	if ( 'lcrm_bill' !== get_post_type( $id ) ) {
 		return error( 'חיוב לא נמצא.', 404 );
 	}
-	$bill = data( $id );
+	$bill = raw_records( array( $id ) )[0];
 	if ( 'approved' === $bill['state'] ) {
 		return $bill;
 	}
@@ -688,12 +850,13 @@ function approve_bill( $id ) {
 	if ( is_wp_error( $result ) ) {
 		return $result;
 	}
-	foreach ( $bill['lines'] as $line ) {
-		$item         = data( $line['delivery'] );
-		$item['bill'] = $id;
-		$saved        = save_record( 'lcrm_delivery', $item, $item['id'] );
-		if ( is_wp_error( $saved ) ) {
-			return $saved;
+	foreach ( array_chunk( array_column( $bill['lines'], 'delivery' ), 5000 ) as $batch ) {
+		foreach ( raw_records( $batch ) as $item ) {
+			$item['bill'] = $id;
+			$saved        = save_record( 'lcrm_delivery', $item, $item['id'] );
+			if ( is_wp_error( $saved ) ) {
+				return $saved;
+			}
 		}
 	}
 	audit( 'bill_approved', $id, array( 'total' => $bill['total'] ) );
@@ -705,14 +868,19 @@ function approve_bill( $id ) {
  * @param int   $bill_id Approved billing snapshot ID.
  * @param array $input Validated request payload.
  * @return mixed Operation result or validation error.
+ * @throws \RuntimeException When an authoritative bill or payment snapshot cannot be verified.
  */
 function record_payment( $bill_id, $input ) {
+	global $wpdb;
 	if ( 'lcrm_bill' !== get_post_type( $bill_id ) ) {
 		return error( 'חיוב לא נמצא.', 404 );
 	}
-	$bill = data( $bill_id );
-	if ( 'approved' !== $bill['state'] ) {
+	$bill = raw_records( array( $bill_id ) )[0];
+	if ( 'approved' !== ( $bill['state'] ?? '' ) ) {
 		return error( 'יש לאשר את החיוב לפני תשלום.' );
+	}
+	if ( ! isset( $bill['total'], $bill['institution'] ) || ! is_int( $bill['total'] ) || $bill['total'] < 0 || empty( $bill['institution'] ) ) {
+		throw new \RuntimeException( 'Approved payment snapshot is invalid.' );
 	}
 	$amount = money( $input['amount'] ?? '' );
 	$date   = $input['date'] ?? '';
@@ -725,25 +893,37 @@ function record_payment( $bill_id, $input ) {
 	if ( ! in_array( $method, array( 'transfer', 'card', 'check', 'cash', 'other' ), true ) ) {
 		return error( 'יש לבחור אמצעי תשלום.' );
 	}
+	$queries  = $wpdb->num_queries;
 	$payments = get_posts(
 		array(
-			'post_type'      => 'lcrm_payment',
-			'post_status'    => 'private',
-			'posts_per_page' => -1,
-			'fields'         => 'ids',
-			'meta_key'       => '_lcrm_bill',
-			'meta_value'     => $bill_id,
+			'cache_results'          => false,
+			'update_post_meta_cache' => false,
+			'update_post_term_cache' => false,
+			'post_type'              => 'lcrm_payment',
+			'post_status'            => 'private',
+			'posts_per_page'         => -1,
+			'fields'                 => 'ids',
+			'meta_key'               => '_lcrm_bill',
+			'meta_value'             => $bill_id,
 		)
 	);
-	$paid     = 0;
-	foreach ( $payments as $pid ) {
-		$p = data( $pid );
-		if ( $p['request_key'] === $key ) {
-			if ( $p['amount'] !== $amount || $p['date'] !== $date || $p['method'] !== $method || $p['reference'] !== $reference ) {
-				return error( 'הניסיון הקודם כבר נשמר עם פרטי תשלום אחרים. יש לרענן ולבדוק את היתרה.', 409 );
+	if ( $wpdb->num_queries <= $queries || $wpdb->last_error ) {
+		throw new \RuntimeException( 'Payment ledger lookup failed.' );
+	}
+	$paid = 0;
+	foreach ( array_chunk( $payments, 5000 ) as $batch ) {
+		foreach ( raw_records( $batch ) as $p ) {
+			if ( ! isset( $p['amount'], $p['bill'], $p['request_key'] ) || ! is_int( $p['amount'] ) || $p['amount'] <= 0 || ! is_string( $p['request_key'] ) || ( ! is_int( $p['bill'] ) && ! is_string( $p['bill'] ) ) || (string) $bill_id !== (string) $p['bill'] ) {
+				throw new \RuntimeException( 'Payment ledger snapshot is invalid.' );
 			}
-			return $p;
-		} $paid += $p['amount'];
+			if ( $p['request_key'] === $key ) {
+				if ( $p['amount'] !== $amount || ( $p['date'] ?? null ) !== $date || ( $p['method'] ?? null ) !== $method || ( $p['reference'] ?? null ) !== $reference ) {
+					return error( 'הניסיון הקודם כבר נשמר עם פרטי תשלום אחרים. יש לרענן ולבדוק את היתרה.', 409 );
+				}
+				return $p;
+			}
+			$paid += $p['amount'];
+		}
 	}
 	if ( $paid + $amount > $bill['total'] ) {
 		return error( 'התשלום גבוה מהיתרה.', 409 );
@@ -841,7 +1021,7 @@ function rollback_caches() {
 		clean_user_cache( $id );
 		wp_cache_delete( $id, 'user_meta' );
 	}
-	foreach ( array( 'lcrm_settings', 'lcrm_mapping_repair', 'lcrm_icount_config', 'lcrm_icount_automatic', 'lcrm_icount_namespace' ) as $option ) {
+	foreach ( array( 'lcrm_settings', 'lcrm_mapping_repair', 'lcrm_duplicate_index', 'lcrm_icount_config', 'lcrm_icount_automatic', 'lcrm_icount_namespace' ) as $option ) {
 		wp_cache_delete( $option, 'options' );
 	}
 	wp_cache_delete( 'notoptions', 'options' );

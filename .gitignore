@@ -6,4 +6,6 @@ node_modules/
 *.sql.gz
 *login*.json
 .phpcs-cache
+__pycache__/
+*.pyc
 artifacts/*.pdf

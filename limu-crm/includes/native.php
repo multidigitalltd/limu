@@ -44,13 +44,206 @@ add_action(
 	3
 );
 
+/** Public source types that may change an exact recipient mapping. */
+const NATIVE_CATALOG_TYPES = array( 'institutions', 'study', 'courses', 'course', 'routes', 'route', 'page' );
+
+/**
+ * Identify the current site's request-local catalog without mixing switched blogs.
+ *
+ * @return string Site-specific request cache key.
+ */
+function native_catalog_scope() {
+	global $wpdb;
+	return get_current_blog_id() . ':' . $wpdb->prefix;
+}
+
+/**
+ * Build a bounded transient name from a catalog revision.
+ *
+ * @param string $revision Revision created by the server.
+ * @return string Blog-scoped transient name.
+ */
+function native_catalog_key( $revision ) {
+	return 'lcrm_catalog_v1_' . md5( $revision );
+}
+
+/**
+ * Validate the compact cache shape without trusting arbitrary cached data.
+ *
+ * @param mixed  $cached Transient payload.
+ * @param string $revision Expected source revision.
+ * @return bool Whether the cached title map is usable.
+ */
+function native_catalog_valid( $cached, $revision ) {
+	if ( ! is_array( $cached ) || array( 'revision', 'titles' ) !== array_keys( $cached ) || $revision !== $cached['revision'] || ! is_array( $cached['titles'] ) || count( $cached['titles'] ) > 20000 ) {
+		return false;
+	}
+	$size = 0;
+	foreach ( $cached['titles'] as $name => $ids ) {
+		if ( ( ! is_string( $name ) && ! is_int( $name ) ) || '' === (string) $name || strlen( (string) $name ) > 4096 || ! is_array( $ids ) || count( $ids ) > 1000 || array_values( $ids ) !== $ids ) {
+			return false;
+		}
+		$size += strlen( (string) $name ) + 32 * ( count( $ids ) + 1 );
+		if ( $size > 2 * MB_IN_BYTES ) {
+			return false;
+		}
+		foreach ( $ids as $id ) {
+			if ( ! is_int( $id ) || $id < 1 ) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+/**
+ * Invalidate the catalog after a relevant post has changed or been deleted.
+ *
+ * @param int           $id Changed post ID, or zero for explicit invalidation.
+ * @param \WP_Post|null $post Supplied post object, including after deletion.
+ * @return void
+ */
+function native_catalog_invalidate( $id = 0, $post = null ) {
+	if ( $id && ! in_array( $post instanceof \WP_Post ? $post->post_type : get_post_type( $id ), NATIVE_CATALOG_TYPES, true ) ) {
+		return;
+	}
+	$scope = native_catalog_scope();
+	unset( $GLOBALS['lcrm_native_catalog_cache'][ $scope ] );
+	$GLOBALS['lcrm_native_catalog_dirty'][ $scope ] = true;
+	if ( ! isset( $GLOBALS['lcrm_changed_records'] ) ) {
+		native_catalog_commit();
+	}
+}
+
+/**
+ * Rotate the revision only after catalog edits have committed.
+ *
+ * @return void
+ */
+function native_catalog_commit() {
+	$scope = native_catalog_scope();
+	if ( empty( $GLOBALS['lcrm_native_catalog_dirty'][ $scope ] ) ) {
+		return;
+	}
+	$old      = get_option( 'lcrm_catalog_revision', '0' );
+	$revision = str_replace( '-', '', wp_generate_uuid4() );
+	if ( is_string( $old ) ) {
+		delete_transient( native_catalog_key( $old ) );
+	}
+	update_option( 'lcrm_catalog_revision', $revision, false );
+	if ( get_option( 'lcrm_catalog_revision' ) !== $revision ) {
+		return; // A cache failure must not turn an already committed financial mutation into an error.
+	}
+	unset( $GLOBALS['lcrm_native_catalog_dirty'][ $scope ], $GLOBALS['lcrm_native_catalog_cache'][ $scope ] );
+}
+add_action( 'lcrm_committed', __NAMESPACE__ . '\\native_catalog_commit' );
+add_action( 'save_post', __NAMESPACE__ . '\\native_catalog_invalidate', 20, 2 );
+add_action( 'deleted_post', __NAMESPACE__ . '\\native_catalog_invalidate', 20, 2 );
+add_action(
+	'transition_post_status',
+	static function ( $new_status, $old_status, $post ) {
+		if ( $new_status !== $old_status ) {
+			native_catalog_invalidate( $post->ID, $post );
+		}
+	},
+	20,
+	3
+);
+
+/**
+ * JetEngine/ACF may persist course relationships after save_post has fired.
+ *
+ * @param int|array $meta_id Changed metadata ID(s).
+ * @param int       $id Source post ID.
+ * @param string    $key Changed metadata key.
+ * @return void
+ */
+function native_catalog_meta_changed( $meta_id, $id, $key ) {
+	if ( ! in_array( $key, array( 'mosad', 'institution', 'institution_acf' ), true ) ) {
+		return;
+	}
+	$type = get_post_type( $id );
+	if ( ( 'study' === $type && 'mosad' === $key ) || ( in_array( $type, array( 'course', 'courses' ), true ) && in_array( $key, array( 'institution', 'institution_acf' ), true ) ) ) {
+		native_catalog_invalidate( $id );
+	}
+}
+foreach ( array( 'added_post_meta', 'updated_post_meta', 'deleted_post_meta' ) as $catalog_meta_hook ) {
+	add_action( $catalog_meta_hook, __NAMESPACE__ . '\\native_catalog_meta_changed', 20, 3 );
+}
+
+/**
+ * Read only relationship metadata instead of hydrating every public post's metadata.
+ *
+ * @param array $posts Source catalog posts.
+ * @return array Parent values grouped by source ID and metadata key.
+ * @throws \RuntimeException When a relationship query fails.
+ */
+function native_catalog_relationships( $posts ) {
+	global $wpdb;
+	$ids = array();
+	foreach ( $posts as $post ) {
+		if ( in_array( $post->post_type, array( 'study', 'courses', 'course' ), true ) ) {
+			$ids[] = (int) $post->ID;
+		}
+	}
+	$relationships = array();
+	foreach ( array_chunk( $ids, 500 ) as $batch ) {
+		$placeholders = implode( ',', array_fill( 0, count( $batch ), '%d' ) );
+		$rows         = $wpdb->get_results( $wpdb->prepare( "SELECT post_id, meta_key, meta_value FROM {$wpdb->postmeta} WHERE post_id IN ($placeholders) AND meta_key IN (%s, %s, %s)", array_merge( $batch, array( 'mosad', 'institution_acf', 'institution' ) ) ), ARRAY_A ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Cached catalog read; all IN values are prepared, with a bounded generated placeholder list.
+		if ( ! is_array( $rows ) || $wpdb->last_error ) {
+			throw new \RuntimeException( 'Source relationship could not be read.' );
+		}
+		foreach ( $rows as $row ) {
+			$relationships[ (int) $row['post_id'] ][ $row['meta_key'] ][] = maybe_unserialize( $row['meta_value'] );
+		}
+	}
+	return $relationships;
+}
+
+/**
+ * Reuse an exact catalog across requests and keep contact data out of its cache.
+ *
+ * @return array Unique and ambiguous title mappings.
+ */
+function native_titles() {
+	$scope = native_catalog_scope();
+	if ( ! empty( $GLOBALS['lcrm_native_catalog_dirty'][ $scope ] ) && ! isset( $GLOBALS['lcrm_changed_records'] ) ) {
+		native_catalog_commit();
+	}
+	if ( empty( $GLOBALS['lcrm_native_catalog_dirty'][ $scope ] ) && isset( $GLOBALS['lcrm_native_catalog_cache'][ $scope ] ) ) {
+		return $GLOBALS['lcrm_native_catalog_cache'][ $scope ];
+	}
+	$revision = get_option( 'lcrm_catalog_revision', '0' );
+	$revision = is_string( $revision ) && preg_match( '/^(?:0|[a-f0-9]{32})$/D', $revision ) ? $revision : '';
+	if ( '' !== $revision && empty( $GLOBALS['lcrm_native_catalog_dirty'][ $scope ] ) ) {
+		$cached = get_transient( native_catalog_key( $revision ) );
+		if ( native_catalog_valid( $cached, $revision ) ) {
+			$GLOBALS['lcrm_native_catalog_cache'][ $scope ] = $cached['titles'];
+			return $cached['titles'];
+		}
+	}
+	$titles = native_catalog_build();
+	// A transaction may contain an uncommitted catalog edit. Never publish that view.
+	if ( ! isset( $GLOBALS['lcrm_changed_records'] ) && empty( $GLOBALS['lcrm_native_catalog_dirty'][ $scope ] ) && '' !== $revision ) {
+		$cached = array(
+			'revision' => $revision,
+			'titles'   => $titles,
+		);
+		if ( native_catalog_valid( $cached, $revision ) ) {
+			set_transient( native_catalog_key( $revision ), $cached, HOUR_IN_SECONDS );
+			$GLOBALS['lcrm_native_catalog_cache'][ $scope ] = $titles;
+		}
+	}
+	return $titles;
+}
+
 /**
  * Build exact public source names and unambiguous study-to-institution relationships.
  *
  * @return array Unique and ambiguous title mappings.
  * @throws \RuntimeException When a catalog or relationship query fails.
  */
-function native_titles() {
+function native_catalog_build() {
 	global $wpdb;
 	$titles  = array();
 	$direct  = array();
@@ -60,16 +253,18 @@ function native_titles() {
 	$queries = $wpdb->num_queries;
 	$posts   = get_posts(
 		array(
-			'post_type'              => array( 'institutions', 'study', 'courses', 'course', 'routes', 'route', 'page' ),
+			'post_type'              => NATIVE_CATALOG_TYPES,
 			'post_status'            => array( 'publish', 'draft' ),
 			'posts_per_page'         => -1,
 			'no_found_rows'          => true,
 			'update_post_term_cache' => false,
+			'update_post_meta_cache' => false,
 		)
 	);
 	if ( $wpdb->num_queries > $queries && $wpdb->last_error ) {
 		throw new \RuntimeException( 'Source catalog could not be read.' );
 	}
+	$relationships = native_catalog_relationships( $posts );
 	foreach ( $posts as $post ) {
 		if ( 'institutions' !== $post->post_type ) {
 			continue;
@@ -99,11 +294,7 @@ function native_titles() {
 		$parents = array();
 		$valid   = true;
 		foreach ( $keys as $key ) {
-			$queries = $wpdb->num_queries;
-			$values  = get_post_meta( $post->ID, $key, false );
-			if ( $wpdb->num_queries > $queries && $wpdb->last_error ) {
-				throw new \RuntimeException( 'Source relationship could not be read.' );
-			}
+			$values = $relationships[ $post->ID ][ $key ] ?? array();
 			foreach ( $values as $value ) {
 				if ( '' === $value ) {
 					continue;
@@ -263,6 +454,17 @@ function native_flush() {
 	$ids                          = array_keys( $GLOBALS['lcrm_native_queue'] ?? array() );
 	$GLOBALS['lcrm_native_queue'] = array();
 	$results                      = array();
+	if ( $ids ) {
+		try {
+			native_titles();
+		} catch ( \Throwable $exception ) {
+			foreach ( $ids as $id ) {
+				$results[ $id ] = error( 'לא ניתן לקרוא את קטלוג המוסדות. יש לנסות שוב.', 503 );
+				native_report_error( $results[ $id ], 0, 'legacy:' . $id );
+			}
+			return $results;
+		}
+	}
 	foreach ( $ids as $id ) {
 		$result         = locked(
 			function () use ( $id ) {

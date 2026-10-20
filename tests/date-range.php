@@ -55,7 +55,7 @@ function range_delivery( $institution, $date, $name, $phone, $tag, $email = '' )
 }
 
 function range_count_record( $institution, $date, $source, $state = 'historical', $contact = 0 ) {
-    $record = LimuCRM\save_record( 'lcrm_delivery', array( 'institution' => $institution, 'date' => $date, 'month' => substr( $date, 0, 7 ), 'source' => $source, 'state' => $state, 'contact' => $contact, 'duplicate_of' => 0, 'bill' => 0 ) );
+    $record = LimuCRM\save_record( 'lcrm_delivery', array( 'institution' => $institution, 'date' => $date, 'month' => substr( $date, 0, 7 ), 'source' => $source, 'state' => $state, 'contact' => $contact, 'phone_key' => '', 'email_key' => '', 'duplicate_of' => 0, 'bill' => 0 ) );
     if ( is_wp_error( $record ) ) {
         throw new RuntimeException( 'Unable to create isolated count fixture.' );
     }

@@ -15,10 +15,10 @@ const assert = require('node:assert/strict');
   {id:2,name:'מוסד עתידי',duplicate_policy:{duplicate_mode:'custom',duplicate_days:45},agreement:{credit_days:15,rates:[{from:'2026-11-15',price:3000,vat_bp:1800}]}},
   {id:3,name:hostile,agreement:null}
  ]};
- const lead={id:91,name:hostile,institution:3,date:'2026-09-15 12:00:00',phone:hostile,email:hostile,form:hostile,duplicate_of:hostile,state:'historical',notes:[{at:'2026-09-15',text:hostile}],treatment:'new'};
+ const lead={id:91,name:hostile,institution:3,date:'2026-09-15 12:00:00',phone:hostile,email:hostile,form:hostile,duplicate_of:hostile,state:'historical',billing_excluded:false,notes:[{at:'2026-09-15',text:hostile}],treatment:'new'};
  const pendingLead={...lead,id:93,name:'קליטה שלא הושלמה',state:'pending'};
  const bill={id:92,institution:3,month:'2026-09',state:'approved',total:1180,subtotal:1000,vat:180,paid:0,due:'2026-11-06',issued:'2026-10-07',duplicates:hostile,historical:hostile,lines:[{delivery:hostile,price:1000}]};
- let mode='normal',refreshFailure=false,pendingWrite=null,releaseWrite,writeStarted,releaseReport,reportStarted,lastSummaryQuery,lastReportQuery,lastExportQuery,lastDeliveryQuery,lastPolicyPayload,lastSettingsPayload,policyWrites=0;
+ let mode='normal',refreshFailure=false,pendingWrite=null,releaseWrite,writeStarted,releaseReport,reportStarted,lastSummaryQuery,lastReportQuery,lastExportQuery,lastDeliveryQuery,lastPolicyPayload,lastSettingsPayload,lastExclusionPayload,lastBillQuery,policyWrites=0,exclusionWrites=0,memberView=false;
  const writeStartedPromise=new Promise(resolve=>writeStarted=resolve);
  const reportStartedPromise=new Promise(resolve=>reportStarted=resolve);
  const checks=[],errors=[];page.on('pageerror',error=>errors.push(error.message));
@@ -31,6 +31,14 @@ const assert = require('node:assert/strict');
  await page.route('**/limu-crm/v1/**',async route=>{
   const url=new URL(route.request().url()),endpoint=url.pathname.split('/').at(-1);
   if(route.request().method()==='POST'){
+   if(endpoint==='billing-exclusion'){
+    lastExclusionPayload=route.request().postDataJSON();exclusionWrites++;
+    assert.equal(lastExclusionPayload.id,91,'Billing exclusion targets the selected delivery');
+    assert.equal(typeof lastExclusionPayload.excluded,'boolean','Billing exclusion is a strict boolean');
+    if(mode==='exclusion-error')return json(route,{message:'לא ניתן לשנות פנייה בתקופה שכבר אושרה.'},409);
+    lead.billing_excluded=lastExclusionPayload.excluded;
+    return json(route,{id:lead.id,billing_excluded:lead.billing_excluded,draft_requires_refresh:mode==='exclusion-draft'});
+   }
    if(endpoint==='institution-policy'){
     lastPolicyPayload=route.request().postDataJSON();policyWrites++;
     if(mode==='policy-error')return json(route,{message:'לא ניתן לשמור את תקופת הכפילות.'},503);
@@ -48,13 +56,14 @@ const assert = require('node:assert/strict');
    return json(route,{saved:true});
   }
   if(mode==='expired')return json(route,{code:'rest_cookie_invalid_nonce',message:'Cookie check failed'},403);
-  if(endpoint==='bootstrap')return refreshFailure?json(route,{message:'כשל רשת מדומה'},503):json(route,bootstrap);
+  if(endpoint==='bootstrap')return refreshFailure?json(route,{message:'כשל רשת מדומה'},503):json(route,memberView?{...bootstrap,manager:false}:bootstrap);
+  if(endpoint==='summary'||endpoint==='bills'||['report','export'].includes(endpoint)&&url.searchParams.get('target')==='bills')assert.equal(url.searchParams.has('billing_status'),false,'Financial summaries and reports never inherit lead billing-status filters');
   if(endpoint==='summary'){lastSummaryQuery=url.searchParams;const scoped=url.searchParams.get('institution')==='2';return json(route,{leads:hostile,received_leads:scoped?6:4622,institution_leads:scoped?9:4008,institution_historical:scoped?1:hostile,...(scoped?{}:{institution_live:hostile}),confirmed:1,approved:1180,paid:0,overdue:0,draft:0,duplicates:0,pending:0,unmapped:scoped?0:3,historical:1,by_institution:{3:1}});}
-  if(endpoint==='deliveries'){lastDeliveryQuery=url.searchParams;const rows=url.searchParams.get('institution')==='2'?[{...lead,id:95,institution:2,name:'פנייה למוסד הנבחר'}]:[lead,pendingLead];return json(route,{items:rows,total:rows.length,pages:1});}
-  if(endpoint==='report'&&url.searchParams.get('target')==='deliveries'){lastReportQuery=url.searchParams;if(mode==='deferred-report'){const pendingReport=new Promise(resolve=>releaseReport=resolve);reportStarted();await pendingReport;}return json(route,{items:[lead,pendingLead],total:2,pages:1});}
-  if(endpoint==='bills'||endpoint==='report'){if(endpoint==='report')lastReportQuery=url.searchParams;return json(route,{items:[bill],total:1,pages:1});}
+  if(endpoint==='deliveries'){lastDeliveryQuery=url.searchParams;let rows=url.searchParams.get('institution')==='2'?[{...lead,id:95,institution:2,name:'פנייה למוסד הנבחר'}]:[lead,pendingLead];if(url.searchParams.get('billing_status')==='excluded')rows=rows.filter(item=>item.billing_excluded);return json(route,{items:rows,total:rows.length,pages:1});}
+  if(endpoint==='report'&&url.searchParams.get('target')==='deliveries'){lastReportQuery=url.searchParams;if(mode==='deferred-report'){const pendingReport=new Promise(resolve=>releaseReport=resolve);reportStarted();await pendingReport;}const rows=[lead,pendingLead].filter(item=>url.searchParams.get('billing_status')!=='excluded'||item.billing_excluded);return json(route,{items:rows,total:rows.length,pages:1});}
+  if(endpoint==='bills'||endpoint==='report'){if(endpoint==='report')lastReportQuery=url.searchParams;else lastBillQuery=url.searchParams;return json(route,{items:[bill],total:1,pages:1});}
   if(endpoint==='export'){lastExportQuery=url.searchParams;return json(route,{file:Buffer.from('Filtered export response fixture').toString('base64'),name:'filtered-fixture.xlsx',count:2});}
-  if(endpoint==='audit')return json(route,{items:[{at:'2026-10-07',event:hostile,actor:hostile,target:hostile}],total:1,pages:1});
+  if(endpoint==='audit')return json(route,{items:[{at:'2026-10-07',event:hostile,actor:hostile,target:hostile},{at:'2026-10-07',event:'delivery_billing_excluded',actor:1,target:91},{at:'2026-10-07',event:'delivery_billing_restored',actor:1,target:91}],total:3,pages:1});
   throw new Error('Unexpected fixture endpoint '+endpoint);
  });
  await page.goto(base+'/crm/');
@@ -96,6 +105,35 @@ const assert = require('node:assert/strict');
  await page.setViewportSize({width:1440,height:1000});
  await page.locator('[data-view="deliveries"]').click();await page.getByRole('heading',{name:'מרכז לידים',exact:true}).waitFor();await check(await page.locator('[data-confirm]').count()===0&&(await page.locator('#screen').textContent()).includes('קליטה לא הושלמה'),'Incomplete legacy capture has no manual lead approval action');await page.locator('[data-detail="91"]').click();
  await check(await page.evaluate(()=>!window.__limuXss)&&await page.locator('dialog img').count()===0,'Lead fields, duplicate references and internal notes escape hostile HTML');await page.keyboard.press('Escape');
+ await check(await page.getByRole('columnheader',{name:'מצב חיוב',exact:true}).count()===1&&await page.locator('#filter-billing-status').inputValue()==='','Lead center separates manual billing status from duplicate and delivery status');
+ await page.locator('[data-detail="93"]').click();await check(await page.locator('#toggle-billing-exclusion').count()===0,'Incomplete lead capture has no billing-exclusion action');await page.keyboard.press('Escape');
+ const originalDuplicate=lead.duplicate_of,originalState=lead.state;
+ await page.locator('[data-detail="91"]').click();await page.getByRole('button',{name:'החרגה מחיוב',exact:true}).click();
+ await check(await page.getByRole('heading',{name:'החרגה מחיוב',exact:true}).isVisible()&&await page.locator('dialog img').count()===0&&await page.evaluate(()=>!window.__limuXss),'Billing exclusion asks for confirmation and escapes contact and institution text');
+ mode='exclusion-draft';await page.getByRole('button',{name:'אישור החרגה מחיוב',exact:true}).click();await page.locator('tbody .badge.excluded').waitFor();await page.waitForFunction(()=>!document.getElementById('modal').open&&document.getElementById('screen').getAttribute('aria-busy')==='false');
+ await check(Object.keys(lastExclusionPayload).sort().join(',')==='excluded,id'&&lastExclusionPayload.excluded===true&&lead.billing_excluded===true&&(await page.locator('#notification').textContent()).includes('יש להכין מחדש')&&lead.duplicate_of===originalDuplicate&&lead.state===originalState&&await page.locator('tbody tr').count()===2,'Exclusion sends a boolean, preserves duplicate and delivery data, and explains draft refresh');
+ const excludedRow=page.locator('tbody tr').filter({has:page.locator('[data-detail="91"]')});
+ await check(await excludedRow.locator('.badge.excluded').count()===1&&(await excludedRow.textContent()).includes('כפול — לא לחיוב'),'Manual exclusion and duplicate indication remain visible together');
+ await page.locator('[data-detail="91"]').click();await page.getByRole('button',{name:'ביטול החרגה',exact:true}).click();mode='exclusion-error';await page.getByRole('button',{name:'אישור ביטול החרגה',exact:true}).click();await page.locator('#billing-exclusion-form .form-error').filter({hasText:'כבר אושרה'}).waitFor();
+ await check(await page.locator('#modal').isVisible()&&await page.getByRole('button',{name:'אישור ביטול החרגה',exact:true}).isEnabled()&&lead.billing_excluded===true,'Approved-period rejection leaves the confirmation open and preserves exclusion');await page.keyboard.press('Escape');mode='normal';
+ await page.locator('#filter-billing-status').selectOption('excluded');await page.locator('#filter-period').selectOption('year');await page.locator('#filter-year').fill('2026');await page.getByRole('button',{name:'הצגת נתונים'}).click();await page.waitForFunction(()=>document.getElementById('screen').getAttribute('aria-busy')==='false');
+ await check(lastDeliveryQuery.get('billing_status')==='excluded'&&lastDeliveryQuery.get('year')==='2026'&&await page.locator('tbody tr').count()===1&&await page.locator('tbody .badge.excluded').count()===1,'Excluded-lead filtering combines with the reporting period');
+ await page.evaluate(()=>{window.print=()=>{};});await page.locator('#print-leads').click();await page.locator('#print-snapshot').waitFor({state:'attached'});
+ await check(lastReportQuery.get('billing_status')==='excluded'&&lastReportQuery.get('year')==='2026'&&await page.locator('#print-snapshot tbody tr').count()===1&&await page.locator('#print-snapshot .badge.excluded').count()===1&&(await page.locator('#print-snapshot').textContent()).includes('מצב חיוב: החרגה מחיוב')&&await page.locator('#print-snapshot img').count()===0,'Lead PDF preserves the exclusion filter and visibly identifies excluded records');await page.evaluate(()=>window.dispatchEvent(new Event('afterprint')));
+ const excludedDownloadStarted=page.waitForEvent('download');await page.locator('#export').click();await excludedDownloadStarted;
+ await check(lastExportQuery.get('billing_status')==='excluded'&&lastExportQuery.get('year')==='2026','Lead Excel export preserves manual exclusion and period filters');
+ await page.locator('[data-view="bills"]').click();await page.getByRole('heading',{name:'חיובים ותשלומים',exact:true}).waitFor();
+ await check(!lastBillQuery.has('billing_status')&&await page.locator('#filter-billing-status').count()===0,'Financial lists do not receive the lead-only exclusion filter');
+ await page.locator('[data-view="reports"]').click();await page.getByRole('heading',{name:'דוחות וסיכומים',exact:true}).waitFor();await page.locator('#print-report').click();await page.locator('#print-snapshot').waitFor({state:'attached'});
+ await check(!lastReportQuery.has('billing_status')&&lastReportQuery.get('target')==='bills','Financial PDF reports do not inherit the lead exclusion filter');await page.evaluate(()=>window.dispatchEvent(new Event('afterprint')));
+ await page.locator('[data-view="dashboard"]').click();await page.getByRole('heading',{name:'סקירה כללית',exact:true}).waitFor();
+ await check(!lastSummaryQuery.has('billing_status')&&!lastDeliveryQuery.has('billing_status')&&(await page.locator('[data-metric="received"] .value').textContent())==='4622'&&(await page.locator('[data-metric="leads"] .value').textContent())==='4008'&&await page.locator('.recent-leads .badge.excluded').count()===1,'Exclusion remains visible in recent leads without changing source or recipient counters');
+ memberView=true;await page.reload();await page.getByRole('heading',{name:'סקירה כללית',exact:true}).waitFor();await page.locator('[data-view="deliveries"]').click();await page.getByRole('heading',{name:'מרכז לידים',exact:true}).waitFor();await page.locator('[data-detail="91"]').click();
+ await check(await page.locator('#modal .badge.excluded').count()===1&&await page.locator('#toggle-billing-exclusion,#treatment-form,#billing-exclusion-form').count()===0,'Institution view shows exclusion as read-only and offers no modification action');await page.keyboard.press('Escape');memberView=false;
+ lead.bill=92;await page.reload();await page.getByRole('heading',{name:'סקירה כללית',exact:true}).waitFor();await page.locator('[data-view="deliveries"]').click();await page.getByRole('heading',{name:'מרכז לידים',exact:true}).waitFor();await page.locator('[data-detail="91"]').click();
+ await check(await page.locator('#toggle-billing-exclusion').isDisabled(),'A delivery bound to an approved bill has a disabled exclusion action');await page.keyboard.press('Escape');lead.bill=0;
+ await page.locator('[data-view="deliveries"]').click();await page.getByRole('heading',{name:'מרכז לידים',exact:true}).waitFor();await page.locator('[data-detail="91"]').click();await page.locator('#toggle-billing-exclusion').click();await page.getByRole('button',{name:'אישור ביטול החרגה',exact:true}).click();await page.locator('tbody .badge.excluded').waitFor({state:'detached'});await page.waitForFunction(()=>!document.getElementById('modal').open&&document.getElementById('screen').getAttribute('aria-busy')==='false');
+ await check(lastExclusionPayload.excluded===false&&lead.billing_excluded===false&&lead.duplicate_of===originalDuplicate&&!((await page.locator('#notification').textContent()).includes('להכין מחדש'))&&await page.locator('tbody .badge.excluded').count()===0,'Restoring a lead clears only its manual flag and does not report an unnecessary draft refresh');
  await page.locator('#filter-period').selectOption('year');await page.locator('#filter-year').fill('2026');await page.getByRole('button',{name:'הצגת נתונים'}).click();await page.waitForFunction(()=>document.getElementById('screen').getAttribute('aria-busy')==='false');
  await page.evaluate(()=>{window.print=()=>{};});await page.locator('#print-leads').click();await page.locator('#print-snapshot').waitFor({state:'attached'});
  await check(await page.evaluate(()=>!window.__limuXss)&&await page.locator('#print-snapshot img').count()===0&&(await page.locator('#print-snapshot').textContent()).includes('דוח לידים')&&await page.locator('#print-snapshot tbody tr').count()===2,'Lead PDF snapshot includes all matching records and escapes hostile contact data');await check(lastReportQuery.get('year')==='2026'&&!lastReportQuery.get('month')&&(await page.locator('#print-snapshot').textContent()).includes('שנת 2026'),'PDF lead report preserves the selected full year');await page.evaluate(()=>window.dispatchEvent(new Event('afterprint')));
@@ -115,6 +153,7 @@ const assert = require('node:assert/strict');
  await check(await page.evaluate(()=>!window.__limuXss)&&await page.locator('dialog img').count()===0,'Billing counters and line references escape hostile HTML');await page.keyboard.press('Escape');
  await page.locator('[data-view="audit"]').click();await page.getByRole('heading',{name:'יומן פעילות',exact:true}).waitFor();
  await check(await page.evaluate(()=>!window.__limuXss)&&await page.locator('#screen img').count()===0,'Audit event, actor and target escape hostile HTML');
+ await check((await page.locator('#screen').textContent()).includes('פנייה הוחרגה מחיוב')&&(await page.locator('#screen').textContent()).includes('החרגה מחיוב בוטלה'),'Audit table labels exclusion and restoration as separate recorded actions');
  await page.locator('[data-view="reports"]').click();await page.getByRole('heading',{name:'דוחות וסיכומים',exact:true}).waitFor();await page.evaluate(()=>{window.print=()=>{};});await page.locator('#print-report').click();await page.locator('#print-snapshot').waitFor({state:'attached'});
  await check(await page.evaluate(()=>!window.__limuXss)&&await page.locator('#print-snapshot img').count()===0,'Print snapshot escapes hostile institution names and data');await page.evaluate(()=>window.dispatchEvent(new Event('afterprint')));
  await page.locator('[data-view="institutions"]').click();await page.getByRole('heading',{name:'מוסדות ותעריפים',exact:true}).waitFor();

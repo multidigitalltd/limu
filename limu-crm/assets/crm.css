@@ -142,6 +142,8 @@
 .lcrm .badge { display: inline-flex; align-items: center; border-radius: 6px; padding: 5px 9px; font-size: 13px; font-weight: 550; line-height: 1.4; background: #f0ebf8; color: #655076; white-space: nowrap; }
 .lcrm .badge.green { background: #edf5ef; color: #2e6847; }
 .lcrm .badge.orange { background: #fff3df; color: #805d1e; }
+.lcrm .badge.excluded { background: var(--rose); color: var(--purple-dark); border: 1px solid var(--rose-line); }
+.lcrm .billing-exclusion-actions { margin-block: 18px 24px; padding-block: 16px; border-block: 1px solid var(--line); }
 .lcrm .empty { padding: 43px 20px; text-align: center; border: 1px dashed #d9cfe1; border-radius: 12px; background: #fffcff; }
 .lcrm .empty strong { display: block; font-size: 19px; margin: 8px; }
 .lcrm .empty p { font-size: 15px; }

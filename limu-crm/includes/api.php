@@ -45,7 +45,7 @@ add_action(
 				)
 			);
 		}
-		foreach ( array( 'settings', 'agreement', 'institution-policy', 'member', 'prepare', 'approve', 'payment', 'import', 'treatment', 'remap' ) as $route ) {
+		foreach ( array( 'settings', 'agreement', 'institution-policy', 'member', 'prepare', 'approve', 'payment', 'import', 'treatment', 'billing-exclusion', 'remap' ) as $route ) {
 			register_rest_route(
 				'limu-crm/v1',
 				'/' . $route,
@@ -112,6 +112,9 @@ function institution_list() {
  * @return mixed Operation result or validation error.
  */
 function public_item( $item ) {
+	if ( isset( $item['id'] ) && 'lcrm_delivery' === get_post_type( $item['id'] ) ) {
+		$item['billing_excluded'] = ! empty( $item['billing_excluded'] );
+	}
 	if ( isset( $item['id'] ) && in_array( get_post_type( $item['id'] ), array( 'lcrm_bill', 'lcrm_payment' ), true ) ) {
 		$item['documents'] = icount_documents( $item['id'] );
 		if ( ! manager() ) {
@@ -125,7 +128,7 @@ function public_item( $item ) {
 	unset( $item['phone_key'], $item['email_key'], $item['request_key'] );
 	if ( ! manager() ) {
 		$item['count'] = isset( $item['lines'] ) ? count( $item['lines'] ) : 0;
-		unset( $item['source'], $item['actor'], $item['approved_by'], $item['lines'], $item['notes'], $item['evidence'], $item['confirmed_by'], $item['contact'], $item['legacy_id'], $item['origin_live'], $item['capture_via'], $item['capture_error'] );
+		unset( $item['source'], $item['actor'], $item['approved_by'], $item['lines'], $item['notes'], $item['evidence'], $item['confirmed_by'], $item['contact'], $item['legacy_id'], $item['origin_live'], $item['capture_via'], $item['capture_error'], $item['billing_excluded_by'], $item['billing_excluded_at'] );
 		if ( isset( $item['duplicate_of'] ) ) {
 			$item['duplicate_of'] = (bool) $item['duplicate_of'];
 		}
@@ -175,21 +178,22 @@ function period_filters( $request ) {
  * @return mixed Operation result or validation error.
  */
 function read_api( $request ) {
-	foreach ( array( 'target', 'institution', 'month', 'year', 'date_from', 'date_to', 'state', 'page', 'search' ) as $key ) {
+	foreach ( array( 'target', 'institution', 'month', 'year', 'date_from', 'date_to', 'state', 'billing_status', 'page', 'search' ) as $key ) {
 		$value = $request->get_param( $key );
 		if ( null !== $value && ! is_scalar( $value ) ) {
 			return error( 'פרמטר לא תקין.' );
 		}
 		$limits = array(
-			'target'      => 20,
-			'institution' => 10,
-			'month'       => 7,
-			'year'        => 4,
-			'date_from'   => 10,
-			'date_to'     => 10,
-			'state'       => 30,
-			'page'        => 7,
-			'search'      => 200,
+			'target'         => 20,
+			'institution'    => 10,
+			'month'          => 7,
+			'year'           => 4,
+			'date_from'      => 10,
+			'date_to'        => 10,
+			'state'          => 30,
+			'billing_status' => 20,
+			'page'           => 7,
+			'search'         => 200,
 		);
 		if ( null !== $value && ( is_bool( $value ) || strlen( (string) $value ) > $limits[ $key ] ) ) {
 			return error( 'פרמטר לא תקין.' );
@@ -202,7 +206,11 @@ function read_api( $request ) {
 	if ( is_wp_error( $period ) ) {
 		return $period;
 	}
-	$route = basename( $request->get_route() );
+	$route          = basename( $request->get_route() );
+	$billing_status = $request->get_param( 'billing_status' );
+	if ( null !== $billing_status && '' !== $billing_status && ( 'excluded' !== $billing_status || ! in_array( $route, array( 'deliveries', 'report', 'export' ), true ) ) ) {
+		return error( 'סינון מצב חיוב זמין רק לפניות.' );
+	}
 	if ( 'bootstrap' === $route ) {
 		// Older cached clients expect this field; never expose or restore retired form mappings.
 		$manager_settings = manager() ? array_merge( settings(), array( 'forms' => array() ) ) : null;
@@ -217,7 +225,7 @@ function read_api( $request ) {
 		);
 	}
 	if ( 'summary' === $route ) {
-		return summary( $request );
+		return cached_summary( $request );
 	}
 	if ( 'audit' === $route && ! manager() ) {
 		return error( 'אין הרשאה.', 403 );
@@ -232,8 +240,14 @@ function read_api( $request ) {
 	if ( ! isset( $types[ $target ] ) || ( 'audit' === $target && ! manager() ) ) {
 		return error( 'דוח לא תקין.' );
 	}
+	if ( null !== $billing_status && '' !== $billing_status && 'deliveries' !== $target ) {
+		return error( 'סינון מצב חיוב זמין רק לפניות.' );
+	}
 	$filters = $period;
-	$id      = absint( $request->get_param( 'institution' ) );
+	if ( 'excluded' === $billing_status ) {
+		$filters['billing_status'] = $billing_status;
+	}
+	$id = absint( $request->get_param( 'institution' ) );
 	if ( $id ) {
 		if ( ! owns( $id ) ) {
 			return error( 'אין הרשאה למוסד.', 403 );
@@ -517,7 +531,7 @@ function write_api( $request ) {
 		$result         = array();
 		$newly_approved = array();
 		foreach ( $ids as $id ) {
-			$was_approved = 'lcrm_bill' === get_post_type( $id ) && 'approved' === ( data( $id )['state'] ?? '' );
+			$was_approved = 'lcrm_bill' === get_post_type( $id ) && 'approved' === ( raw_records( array( $id ) )[0]['state'] ?? '' );
 			$r            = attempt(
 				function () use ( $id ) {
 					return approve_bill( $id );
@@ -539,13 +553,47 @@ function write_api( $request ) {
 	if ( 'payment' === $route ) {
 		return record_payment( absint( $input['bill'] ?? 0 ), $input );
 	}
+	if ( 'billing-exclusion' === $route ) {
+		if ( array_diff( array_keys( $input ), array( 'id', 'excluded' ) ) || ! array_key_exists( 'excluded', $input ) || ! is_bool( $input['excluded'] ) ) {
+			return error( 'פנייה או הגדרת החרגה לא תקינים.' );
+		}
+		$id = absint( $input['id'] ?? 0 );
+		if ( $id < 1 || 'lcrm_delivery' !== get_post_type( $id ) || 'private' !== get_post_status( $id ) ) {
+			return error( 'פנייה לא נמצאה.', 404 );
+		}
+		$item = raw_records( array( $id ) )[0];
+		if ( ! in_array( $item['state'] ?? '', array( 'sent', 'historical' ), true ) || empty( $item['institution'] ) || 'institutions' !== get_post_type( $item['institution'] ) ) {
+			return error( 'יש לשייך את הפנייה למוסד לפני שינוי החרגה מחיוב.' );
+		}
+		$bill     = bill_for( $item['institution'], $item['month'] );
+		$response = array(
+			'id'                     => $id,
+			'billing_excluded'       => $input['excluded'],
+			'draft_requires_refresh' => $bill && 'draft' === $bill['state'],
+		);
+		if ( ! empty( $item['billing_excluded'] ) === $input['excluded'] ) {
+			return $response;
+		}
+		if ( ! empty( $item['bill'] ) || ( $bill && 'approved' === $bill['state'] ) ) {
+			return error( 'לא ניתן לשנות החרגה בתקופה שכבר אושרה. נדרשת התאמה כספית נפרדת.', 409 );
+		}
+		$item['billing_excluded']    = $input['excluded'];
+		$item['billing_excluded_by'] = get_current_user_id();
+		$item['billing_excluded_at'] = current_time( 'mysql' );
+		$saved                       = save_record( 'lcrm_delivery', $item, $id );
+		if ( is_wp_error( $saved ) ) {
+			return $saved;
+		}
+		audit( $input['excluded'] ? 'delivery_billing_excluded' : 'delivery_billing_restored', $id, array( 'institution' => (int) $item['institution'] ) );
+		return $response;
+	}
 	if ( 'treatment' === $route ) {
 		$id    = absint( $input['id'] ?? 0 );
 		$state = sanitize_key( $input['treatment'] ?? '' );
 		if ( 'lcrm_delivery' !== get_post_type( $id ) || ! in_array( $state, array( 'new', 'working', 'closed', 'irrelevant' ), true ) ) {
 			return error( 'פנייה או מצב טיפול לא תקינים.' );
 		}
-		$item              = data( $id );
+		$item              = raw_records( array( $id ) )[0];
 		$item['treatment'] = $state;
 		$note              = sanitize_textarea_field( substr( (string) ( $input['note'] ?? '' ), 0, 2000 ) );
 		if ( $note ) {
@@ -564,7 +612,7 @@ function write_api( $request ) {
 		if ( 'lcrm_delivery' !== get_post_type( $id ) ) {
 			return error( 'פנייה לא נמצאה.', 404 );
 		}
-		$item = data( $id );
+		$item = raw_records( array( $id ) )[0];
 		if ( 'unmapped' !== $item['state'] || $item['bill'] ) {
 			return error( 'ניתן לשייך רק חריג היסטורי ללא חיוב.' );
 		}
@@ -572,14 +620,20 @@ function write_api( $request ) {
 		if ( ! $destinations || count( $destinations ) > 20 ) {
 			return error( 'יש לבחור עד 20 מוסדות.' );
 		}
-		$results = array();
+		// Raw delivery snapshots reference their contact; remapping must reuse frozen identities.
+		$lead          = $item;
+		$lead['name']  = sanitize_text_field( substr( get_post_field( 'post_title', $id, 'raw' ), 0, 600 ) );
+		$lead['phone'] = $item['phone_key'] ?? '';
+		$lead['email'] = $item['email_key'] ?? '';
+		$results       = array();
 		foreach ( $destinations as $institution ) {
-			$result = record_delivery( $item, $institution, $item['source'], empty( $item['origin_live'] ), $item['duplicate_mode'] ?? null );
+			$result = record_delivery( $lead, $institution, $item['source'], empty( $item['origin_live'] ), $item['duplicate_mode'] ?? null );
 			if ( is_wp_error( $result ) ) {
 				return $result;
 
 			} $results[] = $result;
 		}
+		$GLOBALS['lcrm_changed_records'][] = $id;
 		if ( ! wp_trash_post( $id ) ) {
 			return error( 'לא ניתן לסגור את החריג.', 500 );
 		}
@@ -605,12 +659,12 @@ function export_xlsx( $target, $result ) {
 	if ( ! in_array( $target, array( 'deliveries', 'bills' ), true ) ) {
 		return error( 'הייצוא זמין ללידים ולחיובים.' );
 	}
-	$headers      = 'deliveries' === $target ? array( 'מוסד', 'תאריך', 'שם', 'טלפון', 'אימייל', 'מקור', 'כפילות', 'מצב מסירה' ) : array( 'מוסד', 'חודש שירות מלא', 'מצב', 'לפני מעמ', 'מעמ', 'סך הכל', 'שולם', 'יתרה', 'מועד פירעון' );
+	$headers      = 'deliveries' === $target ? array( 'מוסד', 'תאריך', 'שם', 'טלפון', 'אימייל', 'מקור', 'כפילות', 'מצב מסירה', 'מצב חיוב' ) : array( 'מוסד', 'חודש שירות מלא', 'מצב', 'לפני מעמ', 'מעמ', 'סך הכל', 'שולם', 'יתרה', 'מועד פירעון' );
 	$institutions = array_column( institution_list(), 'name', 'id' );
 	$rows         = array( $headers );
 	foreach ( $result['items'] as $item ) {
 		$name   = $institutions[ $item['institution'] ] ?? '';
-		$rows[] = 'deliveries' === $target ? array( $name, $item['date'], $item['name'], $item['phone'], $item['email'], $item['form'] ?? '', $item['duplicate_of'] ? 'כפול — לא לחיוב' : 'ללא כפילות', $item['state'] ) : array( $name, $item['month'], $item['state'], $item['subtotal'] / 100, $item['vat'] / 100, $item['total'] / 100, $item['paid'] / 100, ( $item['total'] - $item['paid'] ) / 100, $item['due'] );
+		$rows[] = 'deliveries' === $target ? array( $name, $item['date'], $item['name'], $item['phone'], $item['email'], $item['form'] ?? '', $item['duplicate_of'] ? 'כפול — לא לחיוב' : 'ללא כפילות', $item['state'], ! empty( $item['billing_excluded'] ) ? 'החרגה מחיוב' : 'ללא החרגה ידנית' ) : array( $name, $item['month'], $item['state'], $item['subtotal'] / 100, $item['vat'] / 100, $item['total'] / 100, $item['paid'] / 100, ( $item['total'] - $item['paid'] ) / 100, $item['due'] );
 	}
 	$xml = '<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0" rightToLeft="1"/></sheetViews><sheetData>';
 	foreach ( $rows as $i => $row ) {
@@ -748,7 +802,7 @@ function summary( $request ) {
 				if ( $b['due'] < $today ) {
 					$out['overdue'] += $b['total'] - $b['paid'];
 				}
-			} else {
+			} elseif ( manager() ) {
 				$out['draft'] += $b['total'];
 			}
 		}

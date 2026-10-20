@@ -4,17 +4,14 @@ const { chromium } = require('playwright');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { createHash } = require('node:crypto');
 
 (async () => {
  const base = process.env.LIMU_TEST_URL || 'http://127.0.0.1:8090';
  assert.equal(new URL(base).hostname, '127.0.0.1', 'Cache regression requires local disposable fixtures');
  const credentials = JSON.parse(fs.readFileSync(process.env.LIMU_TEST_LOGIN, 'utf8'));
- const oldScript = execFileSync('python3', [
-  '-c', 'import sys, zipfile; archive=zipfile.ZipFile(sys.argv[1]); sys.stdout.buffer.write(archive.read("limu-crm/assets/crm.min.js"))',
-  path.resolve(__dirname, '../downloads/limu-crm-0.1.1.zip'),
- ]);
- assert.ok(oldScript.length > 10000, 'Published legacy script is available');
+ const oldScript = fs.readFileSync(path.join(__dirname, 'fixtures/crm-0.1.1.min.js'));
+ assert.equal(createHash('sha256').update(oldScript).digest('hex'), 'b8a8c68152f4ceeff94e27a51e24c10f676c91f8474cd0d1c3d36868d2bf644f', 'The cached-client fixture is the unchanged published 0.1.1 script');
  const browser = await chromium.launch({headless:true, executablePath:process.env.LIMU_CHROMIUM || '/usr/bin/chromium', args:['--no-sandbox']});
  const context = await browser.newContext({locale:'he-IL', viewport:{width:1440, height:1000}});
  const page = await context.newPage();

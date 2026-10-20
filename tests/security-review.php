@@ -309,6 +309,7 @@ try {
     sec_check( 400 === sec_request( 'approve', array( 'ids' => array_fill( 0, 21, $sec_bill['id'] ) ) )->get_status(), 'Oversized approve batch is rejected before deduplication or truncation' );
 
     $sec_callback_ran = false;
+    unset( $GLOBALS['lcrm_transactional_tables'] );
     $sec_query_fault = function ( $query ) {
         if ( 0 === strpos( $query, 'SELECT TABLE_NAME, ENGINE FROM information_schema.TABLES' ) ) {
             return str_replace( 'TABLE_NAME, ENGINE', "TABLE_NAME, 'MyISAM' AS ENGINE", $query );

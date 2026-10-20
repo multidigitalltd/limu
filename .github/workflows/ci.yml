@@ -1,0 +1,169 @@
+name: CRM CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Publish the current installer after all checks pass (main only)
+        type: boolean
+        default: false
+      archive_legacy:
+        description: Also archive historical installers and evidence (requires publish_release)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: crm-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: PHP ${{ matrix.php }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['7.4.33', '8.4']
+    services:
+      database:
+        image: mariadb:11.8
+        env:
+          # This service and these public dummy credentials exist for one CI job only.
+          MARIADB_DATABASE: limu_test
+          MARIADB_USER: limu_test
+          MARIADB_PASSWORD: limu_test
+          MARIADB_ROOT_PASSWORD: limu_test_root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd='healthcheck.sh --connect --innodb_initialized'
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      TZ: Asia/Jerusalem
+      LIMU_TEST_URL: http://127.0.0.1:8090
+      LIMU_DB_NAME: limu_test
+      LIMU_DB_HOST: 127.0.0.1:3306
+      LIMU_DB_USER: limu_test
+      LIMU_DB_PASSWORD: limu_test
+    steps:
+      - name: Check out source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - name: Validate manual publication options
+        if: github.event_name == 'workflow_dispatch' && ((inputs.archive_legacy && !inputs.publish_release) || (inputs.publish_release && github.ref != 'refs/heads/main'))
+        run: |
+          echo 'Publication requires main; archive_legacy also requires publish_release.' >&2
+          exit 1
+      - name: Configure disposable paths
+        run: |
+          echo "LIMU_CI_DIR=$RUNNER_TEMP/limu-crm-ci" >> "$GITHUB_ENV"
+          echo "LIMU_WP_ROOT=$RUNNER_TEMP/limu-crm-ci/wordpress" >> "$GITHUB_ENV"
+      - name: Install Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install PHP
+        uses: shivammathur/setup-php@bf6b4fbd49ca58e4608c9c89fba0b8d90bd2a39f # 2.35.5
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: mysqli, zip, mbstring, dom, simplexml, xmlreader, xmlwriter
+          coverage: none
+          tools: composer:v2
+      - name: Install locked frontend tools
+        run: npm ci
+      - name: Verify source and generated assets
+        run: |
+          npm run check:js
+          npm run build
+          git diff --exit-code -- limu-crm/assets limu-crm/includes/assets.php
+          find limu-crm -name '*.php' -print0 | xargs -0 -n1 php -l
+          php -l scripts/ci-bootstrap.php
+      - name: Check development dependencies
+        run: npm audit
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Prepare verified disposable WordPress
+        run: python3 scripts/ci-prepare.py
+      - name: Install pinned WordPress coding standards outside the checkout
+        run: |
+          mkdir -p "$LIMU_CI_DIR/tools"
+          composer --working-dir="$LIMU_CI_DIR/tools" require --dev --no-interaction --prefer-dist --no-plugins --no-scripts wp-coding-standards/wpcs:3.4.1 squizlabs/php_codesniffer:3.13.6 phpcsstandards/phpcsutils:1.2.3 phpcsstandards/phpcsextra:1.5.1 dealerdirect/phpcodesniffer-composer-installer:1.2.1
+          "$LIMU_CI_DIR/tools/vendor/bin/phpcs" --config-set installed_paths "$LIMU_CI_DIR/tools/vendor/wp-coding-standards/wpcs,$LIMU_CI_DIR/tools/vendor/phpcsstandards/phpcsutils,$LIMU_CI_DIR/tools/vendor/phpcsstandards/phpcsextra"
+          "$LIMU_CI_DIR/tools/vendor/bin/phpcs" --standard=phpcs.xml
+      - name: Install disposable test site
+        run: php scripts/ci-bootstrap.php install
+      - name: Run server regressions sequentially
+        run: python3 scripts/ci-run.py php
+      - name: Prepare private institution browser fixture
+        run: php scripts/ci-bootstrap.php member
+      - name: Run browser and accessibility regressions sequentially
+        run: python3 scripts/ci-run.py browser
+      - name: Verify concurrent payment requests
+        run: python3 scripts/ci-run.py concurrency
+      - name: Build installable package
+        run: node scripts/package.mjs --output "$LIMU_CI_DIR/package"
+      - name: Preserve CI evidence and package
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: crm-php-${{ matrix.php }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/limu-crm-ci/artifacts/
+            ${{ runner.temp }}/limu-crm-ci/package/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  release:
+    name: Publish explicitly requested installers
+    needs: validate
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_release && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    concurrency:
+      group: crm-release-${{ github.repository }}
+      cancel-in-progress: false
+    steps:
+      - name: Check out the validated commit and archive history
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+      - name: Download the tested PHP 7.4 installer
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: crm-php-7.4.33-${{ github.run_id }}
+          path: ${{ runner.temp }}/tested-installer
+      - name: Verify current version, package checksum, and runtime bytes
+        run: python3 scripts/ci-release.py current --prepare-only
+      - name: Publish the verified current installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci-release.py current
+      - name: Archive historical installers and evidence without changing bytes
+        if: inputs.archive_legacy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci-release.py legacy
+      - name: Preserve release verification metadata
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: crm-release-metadata-${{ github.run_id }}
+          path: ${{ runner.temp }}/crm-release-metadata/*/manifest.json
+          if-no-files-found: ignore
+          retention-days: 30

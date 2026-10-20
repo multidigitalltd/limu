@@ -46,8 +46,26 @@ function repair_exception( $value, $overrides = array() ) {
         'duplicate_of' => 0, 'duplicate_mode' => 'days:47', 'form' => 'Historical fixture',
         'treatment' => 'working', 'notes' => array( array( 'text' => 'Preserve C:\\fixture\\note', 'actor' => 0, 'at' => '2019-04-16 12:00:00' ) ),
     ), $overrides );
-    $item = LimuCRM\locked( function () use ( $payload ) { return LimuCRM\save_record( 'lcrm_delivery', $payload ); } );
+    $valid_payload = $payload;
+    $malformed_identity = array();
+    foreach ( array( 'phone_key' => 'normalize_phone', 'email_key' => 'normalize_email' ) as $key => $normalizer ) {
+        $value = $payload[ $key ];
+        $normalized = is_string( $value ) ? call_user_func( 'LimuCRM\\' . $normalizer, $value ) : '';
+        if ( ! is_string( $value ) || $normalized !== $value ) {
+            $malformed_identity[ $key ] = $value;
+            $valid_payload[ $key ] = $normalized;
+        }
+    }
+    $item = LimuCRM\locked( function () use ( $valid_payload ) { return LimuCRM\save_record( 'lcrm_delivery', $valid_payload ); } );
     if ( is_wp_error( $item ) ) { throw new RuntimeException( 'Unable to save historical exception fixture.' ); }
+    if ( $malformed_identity ) {
+        // Model corrupt legacy storage explicitly; current production writes correctly reject it.
+        $payload['id'] = $item['id'];
+        update_post_meta( $item['id'], '_lcrm_data', wp_slash( $payload ) );
+        foreach ( $malformed_identity as $key => $value ) {
+            update_post_meta( $item['id'], '_lcrm_' . $key, wp_slash( $value ) );
+        }
+    }
     return array( 'id' => $item['id'], 'lead' => $lead, 'payload' => get_post_meta( $item['id'], '_lcrm_data', true ) );
 }
 function repair_cursor( $minimum, $maximum ) {

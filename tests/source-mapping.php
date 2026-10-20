@@ -47,6 +47,7 @@ function mapping_fault( $relationship ) {
         }
         return $sql;
     };
+    LimuCRM\native_catalog_invalidate();
     wp_cache_flush();
     if ( $relationship ) { add_action( 'pre_get_posts', $uncached_meta, 99 ); }
     add_filter( 'query', $fault, 99 );

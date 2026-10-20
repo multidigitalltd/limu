@@ -2,7 +2,8 @@
 /**
  * Plugin Name: crm
  * Description: crm
- * Version: 0.1.8
+ * Update URI: false
+ * Version: 0.1.9
  * Requires at least: 6.6
  * Requires PHP: 7.4.33
  * License: GPL-2.0-or-later
@@ -17,16 +18,19 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 define( 'LIMU_CRM_FILE', __FILE__ );
-define( 'LIMU_CRM_VERSION', '0.1.8' );
+define( 'LIMU_CRM_VERSION', '0.1.9' );
 require_once __DIR__ . '/includes/assets.php';
 require_once __DIR__ . '/includes/domain.php';
 require_once __DIR__ . '/includes/store.php';
+require_once __DIR__ . '/includes/duplicate-index.php';
 require_once __DIR__ . '/includes/api.php';
+require_once __DIR__ . '/includes/read-cache.php';
 require_once __DIR__ . '/includes/capture.php';
 require_once __DIR__ . '/includes/native.php';
 require_once __DIR__ . '/includes/mapping-repair.php';
 require_once __DIR__ . '/includes/security.php';
 require_once __DIR__ . '/includes/turnstile.php';
+require_once __DIR__ . '/includes/portal-security.php';
 require_once __DIR__ . '/includes/icount.php';
 require_once __DIR__ . '/includes/icount-api.php';
 
@@ -84,6 +88,7 @@ register_deactivation_hook(
 		wp_clear_scheduled_hook( 'lcrm_daily' );
 		wp_unschedule_hook( 'lcrm_icount_demand' );
 		wp_clear_scheduled_hook( 'lcrm_mapping_repair' );
+		wp_clear_scheduled_hook( 'lcrm_duplicate_index_batch' );
 		flush_rewrite_rules();
 	}
 );
@@ -141,7 +146,7 @@ add_action(
 		header( 'X-Robots-Tag: noindex, nofollow', true );
 		header( 'X-Content-Type-Options: nosniff' );
 		header( 'X-Frame-Options: SAMEORIGIN' );
-		header( "Content-Security-Policy: frame-ancestors 'self'", false );
+		header( 'Content-Security-Policy: ' . portal_csp(), true );
 		header( 'Referrer-Policy: no-referrer' );
 		wp_enqueue_style( 'limu-crm', plugins_url( 'assets/' . ASSETS['crm.css'], LIMU_CRM_FILE ), array(), LIMU_CRM_VERSION );
 		$font_css = '';
@@ -155,7 +160,6 @@ add_action(
 			$font_url  = str_replace( array( '\\', '"', '<', "\n", "\r", "\f" ), array( '\\\\', '\\"', '\\3c ', '\\a ', '\\d ', '\\c ' ), $font_url );
 			$font_css .= '@font-face{font-family:"CRM Ploni";font-style:normal;font-weight:' . $weight . ';font-display:swap;src:url("' . $font_url . '") format("woff2")}';
 		}
-		wp_add_inline_style( 'limu-crm', $font_css );
 		wp_enqueue_script(
 			'limu-crm-privacy',
 			plugins_url( 'assets/' . ASSETS['privacy.js'], LIMU_CRM_FILE ),

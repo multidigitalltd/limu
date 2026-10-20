@@ -19,7 +19,10 @@ if ( ! defined( 'ABSPATH' ) ) {
  * @return array|\WP_Error Updated delivery or an immutable-period conflict.
  */
 function reconcile_duplicates( $changed ) {
-	$items   = institution_deliveries( $changed['institution'], null, null, false );
+	$items = duplicate_component( $changed );
+	if ( is_wp_error( $items ) ) {
+		return $items;
+	}
 	$bases   = array();
 	$history = array();
 	$roots   = array();
@@ -44,10 +47,8 @@ function reconcile_duplicates( $changed ) {
 				if ( $item['bill'] || ( 'sent' === $item['state'] && $bills[ $item['month'] ] && 'approved' === $bills[ $item['month'] ]['state'] ) ) {
 					return error( 'הקליטה תשנה כפילות בתקופה שכבר אושרה. נדרשת התאמה כספית נפרדת.', 409 );
 				}
-				$item['duplicate_of']    = $duplicate;
-				$updated                 = data( $item['id'] );
-				$updated['duplicate_of'] = $duplicate;
-				$result                  = save_record( 'lcrm_delivery', $updated, $item['id'] );
+				$item['duplicate_of'] = $duplicate;
+				$result               = save_record( 'lcrm_delivery', $item, $item['id'] );
 				if ( is_wp_error( $result ) ) {
 					return $result;
 				}
