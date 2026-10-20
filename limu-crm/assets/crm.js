@@ -8,6 +8,8 @@
   const emptyFilter = () => ({ month: "", year: "", date_from: "", date_to: "", institution: "", state: "", search: "", billing_status: "" });
   let bootstrap, view = "dashboard", page = 1, items = [], filter = emptyFilter(), lastFocus;
   let generation = 0, modalSession = 0;
+  const selectedInstitutions = new Set();
+  let bulkRatesSaving = false;
   const titles = {
     dashboard: "סקירה כללית",
     deliveries: "מרכז לידים",
@@ -303,13 +305,26 @@
     const collected = d.approved > 0 ? Math.max(0, Math.min(100, Math.round(d.paid / d.approved * 100))) : 0;
     const received = d.received_leads ?? d.leads ?? 0, institutionLeads = d.institution_leads ?? d.leads ?? 0, historical = d.institution_historical ?? d.historical ?? 0;
     const live = d.institution_live ?? Math.max(0, institutionLeads - historical), unmapped = bootstrap.manager ? d.unmapped || 0 : 0;
+    const capturePending = bootstrap.manager && Number.isSafeInteger(d.capture_pending) && d.capture_pending >= 0 ? d.capture_pending : null;
+    const captureNotice = capturePending > 0 ? `<section class="rate-alert" id="capture-retry-alert" aria-labelledby="capture-retry-title">
+      <div><strong id="capture-retry-title">${e(capturePending)} פניות ממתינות לקליטה</strong>
+      <p>ניסיון נוסף מתבצע אוטומטית מדי שעה. כל פנייה נספרת פעם אחת, גם אם מיועדת לכמה מוסדות.</p>
+      <p>הנתון כולל את כל התקופות והמוסדות ואינו מושפע מהסינון.</p>
+      </div></section>` : "";
+    const captureAttention = bootstrap.manager ? capturePending === null ? "" : `<div class="attention-item">
+      <dt>פניות ממתינות לקליטה · כל המערכת</dt>
+      <dd id="capture-pending-count">${e(capturePending)}</dd>
+      </div>` : `<div class="attention-item">
+      <dt>קליטה לא הושלמה</dt>
+      <dd>${e(d.pending)}</dd>
+      </div>`;
     const assignmentNotice = unmapped > 0 ? `<section class="rate-alert" id="assignment-alert" aria-labelledby="assignment-title">
       <div><strong id="assignment-title">${e(metricLabel(`${unmapped} פניות ללא שיוך למוסד`))}</strong>
       <p>הספירה למוסדות כוללת פניות משויכות מההיסטוריה ומהקליטה השוטפת. בפניות אלה חסר שיוך למוסד, ולכן הן עדיין אינן כלולות בספירה למוסדות.</p>
       </div>
       <button class="button" id="open-unmapped">הצגת פניות לשיוך</button></section>` : "";
     screen.innerHTML = heading("סקירה כללית", "מבט על הלידים, המוסדות והגבייה", `<button class="button" id="open-leads">צפייה בלידים</button>
-      <button class="button primary" id="open-bills">ניהול חיובים</button>`) + filters() + `<p class="filter-summary">${e(scopeLabel())}${filter.institution ? "" : " · כל המוסדות"}</p>${missing.length ? `<section class="rate-alert">
+      <button class="button primary" id="open-bills">ניהול חיובים</button>`) + captureNotice + filters() + `<p class="filter-summary">${e(scopeLabel())}${filter.institution ? "" : " · כל המוסדות"}</p>${missing.length ? `<section class="rate-alert">
       <div><strong>${e(missing.length)} מוסדות ללא תעריף פעיל</strong>
       <p>יש להשלים תעריף כדי להכין עבורם חיובים.</p>
       </div>
@@ -344,10 +359,7 @@
       </div>${bootstrap.manager ? `<div class="attention-item">
       <dt>פניות ללא שיוך</dt>
       <dd>${e(d.unmapped)}</dd>
-      </div>` : ""}<div class="attention-item">
-      <dt>קליטה לא הושלמה</dt>
-      <dd>${e(d.pending)}</dd>
-      </div>
+      </div>` : ""}${captureAttention}
       ${bootstrap.manager ? `<div class="attention-item">
       <dt>חיובים שממתינים לאישור</dt>
       <dd>${money(d.draft)}</dd>
@@ -794,11 +806,14 @@
   function renderInstitutions() {
     const search = document.getElementById("institution-search").value.trim().toLocaleLowerCase("he-IL"), status = document.getElementById("institution-status").value;
     const matches = bootstrap.institutions.filter((i) => (!search || i.name.toLocaleLowerCase("he-IL").includes(search)) && (status === "all" || (status === "missing" ? !currentRate(i.agreement) : !!currentRate(i.agreement))));
+    const visible = new Set(matches.map((i) => i.id));
+    selectedInstitutions.forEach((id) => { if (!visible.has(id)) selectedInstitutions.delete(id); });
     document.getElementById("institution-count").textContent = `${matches.length} מוסדות`;
     const grid = document.getElementById("institution-list");
     grid.innerHTML = matches.length ? matches.map((i) => {
       const rate = currentRate(i.agreement), future = nextRate(i.agreement);
       return `<article class="card">
+        ${bootstrap.manager ? `<label class="check-label"><input class="institution-check" type="checkbox" value="${e(i.id)}" aria-label="בחירה לעדכון תעריף · ${e(i.name)}" ${selectedInstitutions.has(i.id) ? "checked" : ""}><span>בחירה לעדכון תעריף</span></label>` : ""}
         <div class="institution-head"><span class="institution-mark" aria-hidden="true">${e(i.name.slice(0, 1))}</span>${badge(rate ? "תעריף פעיל" : future ? "תעריף עתידי בלבד" : "חסר תעריף", rate ? "green" : "orange")}</div>
         <h2>${e(i.name)}</h2>
         <div class="rate-value">${rate ? money(rate.price) : "—"}</div>
@@ -812,9 +827,33 @@
     grid.querySelectorAll("[data-policy]").forEach((button) => button.addEventListener("click", () => policyModal(bootstrap.institutions.find((i) => i.id === Number(button.dataset.policy)))));
     grid.querySelectorAll("[data-rate]").forEach((button) => button.addEventListener("click", () => rateModal(bootstrap.institutions.find((i) => i.id === Number(button.dataset.rate)))));
     grid.querySelectorAll("[data-icount-client]").forEach((button) => button.addEventListener("click", () => icountClientModal(bootstrap.institutions.find((i) => i.id === Number(button.dataset.icountClient)))));
+    grid.querySelectorAll(".institution-check").forEach((checkbox) => checkbox.addEventListener("change", () => {
+      if (checkbox.checked && selectedInstitutions.size >= 100) {
+        checkbox.checked = false;
+        notice("אפשר לעדכן עד 100 מוסדות יחד. יש לצמצם את הבחירה או את הסינון.", true);
+      } else if (checkbox.checked) selectedInstitutions.add(Number(checkbox.value));
+      else selectedInstitutions.delete(Number(checkbox.value));
+      syncInstitutionSelection();
+    }));
+    syncInstitutionSelection();
+  }
+  function syncInstitutionSelection() {
+    const all = document.getElementById("institutions-select-all"), button = document.getElementById("bulk-rates");
+    if (!all || !button) return;
+    const checkboxes = [...screen.querySelectorAll(".institution-check")];
+    checkboxes.forEach((checkbox) => checkbox.disabled = bulkRatesSaving);
+    all.checked = checkboxes.length > 0 && checkboxes.every((checkbox) => checkbox.checked);
+    all.indeterminate = !all.checked && checkboxes.some((checkbox) => checkbox.checked);
+    all.disabled = bulkRatesSaving || !checkboxes.length;
+    button.disabled = bulkRatesSaving || !selectedInstitutions.size;
+    document.getElementById("institution-selected-count").textContent = `מוסדות נבחרים: ${selectedInstitutions.size}`;
+    document.getElementById("institution-search").disabled = bulkRatesSaving;
+    document.getElementById("institution-status").disabled = bulkRatesSaving;
   }
   async function institutions(token) {
     if (token !== generation) return;
+    if (!bootstrap.manager) throw new Error("אין הרשאה לניהול מוסדות ותעריפים.");
+    selectedInstitutions.clear();
     screen.innerHTML = heading("מוסדות ותעריפים", "תעריפים, תנאי תשלום וזיהוי כפילויות לפי ההסכם עם כל מוסד") + `<div class="filters">
       <div>
       <label for="institution-search">חיפוש מוסד</label>
@@ -824,10 +863,91 @@
       <select id="institution-status"><option value="all">כל המוסדות</option><option value="missing">ללא תעריף פעיל</option><option value="active">עם תעריף פעיל</option></select>
       </div>
       <span class="muted" id="institution-count" role="status"></span></div>
+      <div class="filters" id="institution-bulk-bar">
+      <label class="check-label"><input id="institutions-select-all" type="checkbox"><span>בחירת כל המוסדות המוצגים</span></label>
+      <span class="muted" id="institution-selected-count" role="status" aria-live="polite">מוסדות נבחרים: 0</span>
+      <button class="button primary" id="bulk-rates" disabled>עדכון תעריפים</button></div>
       <div class="institution-grid" id="institution-list"></div>`;
     document.getElementById("institution-search").addEventListener("input", renderInstitutions);
     document.getElementById("institution-status").addEventListener("change", renderInstitutions);
+    document.getElementById("institutions-select-all").addEventListener("change", (event) => {
+      const checkboxes = [...screen.querySelectorAll(".institution-check")];
+      if (event.target.checked && checkboxes.length > 100) {
+        notice("אפשר לעדכן עד 100 מוסדות יחד. יש לצמצם את הסינון.", true);
+        syncInstitutionSelection();
+        return;
+      }
+      checkboxes.forEach((checkbox) => {
+        checkbox.checked = event.target.checked;
+        if (checkbox.checked) selectedInstitutions.add(Number(checkbox.value));
+        else selectedInstitutions.delete(Number(checkbox.value));
+      });
+      syncInstitutionSelection();
+    });
+    document.getElementById("bulk-rates").addEventListener("click", () => bulkRateModal());
     renderInstitutions();
+  }
+  function bulkRateModal(values = { price: "", from: bootstrap.today }, chosen = [...selectedInstitutions], trigger = document.getElementById("bulk-rates")) {
+    if (!bootstrap.manager || !chosen.length || chosen.length > 100 || bulkRatesSaving) return;
+    const institutions = bootstrap.institutions.filter((institution) => chosen.includes(institution.id));
+    if (institutions.length !== chosen.length) return;
+    openModal(`<h2 id="modal-title">עדכון תעריפים · ${chosen.length === 1 ? "מוסד אחד" : `${e(chosen.length)} מוסדות`}</h2>
+      <ul>${institutions.map((institution) => `<li>${e(institution.name)}</li>`).join("")}</ul>
+      <form id="bulk-rate-form"><div class="form-grid">
+      <div><label for="bulk-rate-price">מחיר משותף לליד לפני מע״מ (₪)</label>
+      <input id="bulk-rate-price" name="price" type="number" min="0" step="0.01" value="${e(values.price)}" required></div>
+      <div><label for="bulk-rate-from">תחולת תעריף</label>
+      <input id="bulk-rate-from" name="from" type="date" value="${e(values.from)}" required></div></div>
+      <p class="muted">מע״מ בשיעור 18% מתווסף אוטומטית. ימי האשראי, תקופות הכפילות והיסטוריית התעריפים של כל מוסד נשמרים.</p>
+      ${formError}<button class="button primary" type="submit">המשך לאישור העדכון</button></form>`);
+    lastFocus = trigger;
+    document.getElementById("bulk-rate-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const data = Object.fromEntries(new FormData(event.target));
+      if (!/^\d+(?:\.\d{1,2})?$/.test(data.price)) {
+        event.target.querySelector(".form-error").textContent = "יש להזין מחיר בשקלים עם עד שתי ספרות אחרי הנקודה.";
+        return;
+      }
+      confirmBulkRates(institutions, data, trigger);
+    });
+  }
+  function confirmBulkRates(institutions, values, trigger) {
+    const chosen = institutions.map((institution) => institution.id);
+    openModal(`<h2 id="modal-title">אישור עדכון תעריפים</h2>
+      <p>מוסדות שנבחרו לעדכון: ${e(chosen.length)}</p>
+      <ul>${institutions.map((institution) => `<li>${e(institution.name)}</li>`).join("")}</ul>
+      <p>מחיר לליד לפני מע״מ: <strong>${e(values.price)} ₪</strong> · מע״מ 18%</p>
+      <p>תחולת התעריף: <strong>${e(values.from)}</strong></p>
+      <p class="muted">כל המוסדות יתעדכנו יחד. אם העדכון מתנגש בחיוב מאושר אצל אחד מהם, הפעולה כולה תיעצר ללא שינוי.</p>
+      <form id="bulk-rate-confirm-form">${formError}<div class="actions">
+      <button class="button primary" type="submit">אישור עדכון התעריפים</button>
+      <button class="button" id="edit-bulk-rates" type="button">חזרה לעריכה</button></div></form>`);
+    lastFocus = trigger;
+    document.getElementById("edit-bulk-rates").addEventListener("click", () => bulkRateModal(values, chosen, trigger));
+    document.getElementById("bulk-rate-confirm-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      submit(event.target, async () => {
+        const button = event.target.querySelector('button[type="submit"]'), label = button.textContent;
+        bulkRatesSaving = true;
+        button.textContent = "מעדכן תעריפים…";
+        document.getElementById("edit-bulk-rates").disabled = true;
+        syncInstitutionSelection();
+        try {
+          const result = await api("agreements-bulk", { institutions: chosen, from: values.from, price: values.price });
+          const ids = Array.isArray(result?.updated) && Array.isArray(result?.unchanged) ? [...result.updated, ...result.unchanged] : [];
+          if (ids.length !== chosen.length || new Set(ids).size !== chosen.length || !ids.every((id) => chosen.includes(id)) || result.count !== result.updated.length) {
+            throw new Error("לא ניתן לאמת את תוצאת העדכון. יש לרענן את הנתונים לפני ניסיון נוסף.");
+          }
+          selectedInstitutions.clear();
+          return result;
+        } finally {
+          bulkRatesSaving = false;
+          button.textContent = label;
+          event.target.querySelector("#edit-bulk-rates").disabled = false;
+          syncInstitutionSelection();
+        }
+      }, (result) => result.updated.length ? `עדכון התעריפים הושלם · עודכנו: ${result.updated.length}${result.unchanged.length ? ` · ללא שינוי: ${result.unchanged.length}` : ""}` : "תעריפי המוסדות כבר מעודכנים. לא נדרשו שינויים.");
+    });
   }
   const duplicatePeriods = [["all_time", "כל ההיסטוריה — ללא הגבלת זמן"], ["calendar", "שנה קלנדרית — ינואר עד דצמבר"], ["days_30", "30 ימים מהפנייה המקורית"], ["days_90", "90 ימים מהפנייה המקורית"], ["days_180", "180 ימים מהפנייה המקורית"], ["rolling", "12 חודשים מהפנייה המקורית"], ["months_24", "24 חודשים מהפנייה המקורית"], ["custom", "מספר ימים לבחירה"]];
   function duplicateLabel(policy) {

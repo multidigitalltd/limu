@@ -45,7 +45,7 @@ add_action(
 				)
 			);
 		}
-		foreach ( array( 'settings', 'agreement', 'institution-policy', 'member', 'prepare', 'approve', 'payment', 'import', 'treatment', 'billing-exclusion', 'remap' ) as $route ) {
+		foreach ( array( 'settings', 'agreement', 'agreements-bulk', 'institution-policy', 'member', 'prepare', 'approve', 'payment', 'import', 'treatment', 'billing-exclusion', 'remap' ) as $route ) {
 			register_rest_route(
 				'limu-crm/v1',
 				'/' . $route,
@@ -225,7 +225,21 @@ function read_api( $request ) {
 		);
 	}
 	if ( 'summary' === $route ) {
-		return cached_summary( $request );
+		$result = cached_summary( $request );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+		if ( manager() ) {
+			$pending = capture_pending_count();
+			if ( is_wp_error( $pending ) ) {
+				return $pending;
+			}
+			// Retry health spans all sources, including those without a resolved institution.
+			$result['capture_pending'] = $pending;
+		} else {
+			unset( $result['capture_pending'] );
+		}
+		return $result;
 	}
 	if ( 'audit' === $route && ! manager() ) {
 		return error( 'אין הרשאה.', 403 );
@@ -391,81 +405,18 @@ function write_api( $request ) {
 		return $config;
 	}
 	if ( 'agreement' === $route ) {
-		$id = absint( $input['institution'] ?? 0 );
-		if ( 'institutions' !== get_post_type( $id ) ) {
-			return error( 'מוסד לא נמצא.' );
-		}
-		$from  = $input['from'] ?? '';
-		$price = money( $input['price'] ?? '' );
-		$days  = $input['credit_days'] ?? null;
-		if ( ! valid_date( $from ) || null === $price || ! is_numeric( $days ) || ! preg_match( '/^\d{1,3}$/D', (string) $days ) || $days < 0 || $days > 365 ) {
+		if ( ! agreement_credit_days_valid( $input['credit_days'] ?? null ) ) {
 			return error( 'תעריף, תאריך או ימי אשראי לא תקינים.' );
 		}
-		$config = agreement( $id ) ?? array(
-			'rates'       => array(),
-			'credit_days' => 0,
-		);
-		// Prevent retrospective tariff edits after any bill for the institution was approved.
-		$latest = get_posts(
-			array(
-				'post_type'      => 'lcrm_bill',
-				'post_status'    => 'private',
-				'posts_per_page' => 1,
-				'fields'         => 'ids',
-				'meta_query'     => array(
-					array(
-						'key'   => '_lcrm_institution',
-						'value' => $id,
-					),
-					array(
-						'key'   => '_lcrm_state',
-						'value' => 'approved',
-					),
-				),
-				'meta_key'       => '_lcrm_month',
-				'orderby'        => 'meta_value',
-				'order'          => 'DESC',
-			)
-		);
-		if ( $latest && substr( $from, 0, 7 ) <= data( $latest[0] )['month'] ) {
-			return error( 'לא ניתן לשנות תעריף בתקופה שכבר אושרה.', 409 );
+		$result = agreement_write( absint( $input['institution'] ?? 0 ), $input['from'] ?? '', $input['price'] ?? '', $input['credit_days'] );
+		return is_wp_error( $result ) ? $result : $result['config'];
+	}
+	if ( 'agreements-bulk' === $route ) {
+		$raw = json_decode( $request->get_body() );
+		if ( ! is_object( $raw ) || ! isset( $raw->institutions ) || ! is_array( $raw->institutions ) ) {
+			return error( 'רשימת המוסדות אינה תקינה.' );
 		}
-		$config['rates']       = array_values(
-			array_filter(
-				$config['rates'],
-				function ( $rate ) use ( $from ) {
-					return $rate['from'] !== $from;
-				}
-			)
-		);
-		$config['rates'][]     = array(
-			'from'   => $from,
-			'price'  => $price,
-			'vat_bp' => VAT_BP,
-		);
-		$config['credit_days'] = (int) $days;
-		usort(
-			$config['rates'],
-			function ( $a, $b ) {
-				return strcmp( $a['from'], $b['from'] );
-			}
-		);
-		$GLOBALS['lcrm_changed_records'][] = $id;
-		update_post_meta( $id, '_lcrm_agreement', $config );
-		if ( get_post_meta( $id, '_lcrm_agreement', true ) !== $config ) {
-			return error( 'שמירת ההסכם נכשלה.', 500 );
-		}
-		audit(
-			'agreement_changed',
-			$id,
-			array(
-				'from'        => $from,
-				'price'       => $price,
-				'vat_bp'      => VAT_BP,
-				'credit_days' => (int) $days,
-			)
-		);
-		return $config;
+		return agreements_bulk_write( $input );
 	}
 	if ( 'member' === $route ) {
 		$user = get_user_by( 'email', sanitize_email( $input['email'] ?? '' ) );

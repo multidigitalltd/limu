@@ -32,7 +32,7 @@ function native_test_lead( $institution, $date, $phone, $status = 'publish' ) {
 	return $id;
 }
 $track = function ( $id, $post, $update ) use ( &$created ) {
-	if ( ! $update && in_array( $post->post_type, array( 'institutions', 'leads', 'lcrm_contact', 'lcrm_delivery', 'lcrm_bill', 'lcrm_audit' ), true ) ) {
+	if ( ! $update && in_array( $post->post_type, array( 'institutions', 'leads', 'lcrm_contact', 'lcrm_delivery', 'lcrm_bill', 'lcrm_audit', 'lcrm_capture' ), true ) ) {
 		$created[] = $id;
 	}
 };
@@ -138,6 +138,8 @@ try {
 	$again = LimuCRM\native_http_capture( $response, 'response', 'test', $args, $url );
 	native_check( $again['id'] === $ajax_a['id'], 'Repeated HTTP observer callback is idempotent within the same request' );
 	update_post_meta( $b, 'cid', $prefix . '-cid-a' );
+	native_check( $ajax_a['id'] === LimuCRM\native_http_capture( $response, 'response', 'test', $args, $url )['id'], 'An accepted callback replay preserves its frozen recipient after CID configuration changes' );
+	unset( $GLOBALS['lcrm_native_ajax_source'], $GLOBALS['lcrm_native_ajax_results'], $GLOBALS['lcrm_native_ajax_queue'] );
 	native_check( null === LimuCRM\native_http_capture( $response, 'response', 'test', $args, $url ), 'Ambiguous CID mapping cannot disclose a contact to guessed institutions' );
 	$_REQUEST['action'] = array( 'institution_interested' );
 	native_check( null === LimuCRM\native_http_capture( $response, 'response', 'test', $args, $url ), 'Malformed public action selector is rejected safely' );
@@ -145,7 +147,7 @@ try {
 } finally {
 	remove_filter( 'wp_doing_ajax', $ajax );
 	remove_action( 'wp_after_insert_post', $track, 99 );
-	unset( $GLOBALS['lcrm_native_new_leads'], $GLOBALS['lcrm_native_queue'], $GLOBALS['lcrm_native_ajax_source'] );
+	unset( $GLOBALS['lcrm_native_new_leads'], $GLOBALS['lcrm_native_queue'], $GLOBALS['lcrm_native_markers'], $GLOBALS['lcrm_native_ajax_source'], $GLOBALS['lcrm_native_ajax_results'], $GLOBALS['lcrm_native_ajax_queue'] );
 	foreach ( array_reverse( array_unique( $created ) ) as $id ) {
 		wp_delete_post( $id, true );
 	}
