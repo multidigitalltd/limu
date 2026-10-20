@@ -581,6 +581,7 @@ function native_http_capture( $response, $context, $transport, $args, $url ) {
 	}
 	if ( empty( $GLOBALS['lcrm_native_ajax_source'] ) ) {
 		$GLOBALS['lcrm_native_ajax_source'] = 'ajax:' . wp_generate_uuid4();
+		$GLOBALS['lcrm_native_ajax_date']   = current_time( 'mysql' );
 	}
 	$source = $GLOBALS['lcrm_native_ajax_source'];
 	$key    = hash( 'sha256', $source . ':' . $cid );
@@ -591,7 +592,7 @@ function native_http_capture( $response, $context, $transport, $args, $url ) {
 		'name'  => sanitize_text_field( $query['fName'] ),
 		'phone' => sanitize_text_field( $query['phone'] ),
 		'email' => sanitize_email( $query['email'] ),
-		'date'  => current_time( 'mysql' ),
+		'date'  => $GLOBALS['lcrm_native_ajax_date'],
 		'form'  => 'institution_interested',
 	);
 	$id   = $GLOBALS['lcrm_native_ajax_queue'][ $key ] ?? capture_retry_ajax_enqueue( $lead, $cid, $source );
