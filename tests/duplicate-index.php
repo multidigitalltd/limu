@@ -98,6 +98,20 @@ try {
     $fallback = LimuCRM\duplicate_component( LimuCRM\data( $chain['id'] ) );
     index_check( ! is_wp_error( $fallback ) && count( $fallback ) > 100 && in_array( $anchor['id'], array_column( $fallback, 'id' ), true ), 'Incomplete indexes use the full historical fallback instead of losing an old matching lead' );
 
+    $legacy = $unrelated[0];
+    delete_post_meta( $legacy['id'], '_lcrm_phone_key' );
+    delete_post_meta( $legacy['id'], '_lcrm_email_key' );
+    $cursor = index_cursor( $anchor['id'], $last );
+    $ghost_complete = $cursor;
+    $ghost_complete['cursor'] = $last;
+    $ghost_complete['done'] = true;
+    wp_cache_set( 'lcrm_duplicate_index', $ghost_complete, 'options' );
+    $cached_repeat = index_capture( $a, '2024-04-15 10:00:00', $legacy['phone_key'], $legacy['email_key'] );
+    index_check( $legacy['id'] === $cached_repeat['duplicate_of'], 'An uncommitted complete options-cache value cannot make an unindexed historical repeat billable' );
+    $authoritative_state = LimuCRM\duplicate_index_state();
+    index_check( $cursor === $authoritative_state, 'Initialization reads the committed migration cursor instead of a valid-looking cached completion marker' );
+    wp_cache_delete( 'lcrm_duplicate_index', 'options' );
+
     $invalid = $oldest_snapshot; $invalid['duplicate_of'] = -1;
     $wrong_month = $oldest_snapshot; $wrong_month['month'] = '2010-02';
     index_check( ! LimuCRM\duplicate_index_valid_item( $invalid, $anchor['id'] ) && ! LimuCRM\duplicate_index_valid_item( $wrong_month, $anchor['id'] ), 'Corrupt financial references and mismatched billing months cannot enter matching' );
@@ -115,8 +129,10 @@ try {
     $blocked_batch = LimuCRM\duplicate_index_run();
     remove_filter( 'query', $query_fault ); $query_fault = null;
     index_check( is_wp_error( $blocked_batch ) && 500 === $blocked_batch->get_error_data()['status'] && $cursor === get_option( 'lcrm_duplicate_index' ), 'A silently blocked batch query leaves the frozen cursor incomplete and unchanged' );
+    wp_cache_set( 'lcrm_duplicate_index', $ghost_complete, 'options' );
     $first_batch = LimuCRM\duplicate_index_run();
     index_check( ! is_wp_error( $first_batch ) && LimuCRM\DUPLICATE_INDEX_BATCH === $first_batch['processed'] && ! $first_batch['done'] && $first_batch['cursor'] <= $last, 'One cron batch indexes at most one hundred existing private recipients' );
+    index_check( $first_batch === LimuCRM\duplicate_index_read_state(), 'A cached complete cursor cannot skip pending database rows in the background migration' );
     index_check( $oldest_snapshot === get_post_meta( $anchor['id'], '_lcrm_data', true ) && '0591122334' === get_post_meta( $anchor['id'], '_lcrm_phone_key', true ), 'Backfill reads frozen database identities despite a poisoned object cache and preserves the delivery snapshot' );
     index_check( (string) $a === get_post_meta( $anchor['id'], '_lcrm_institution', true ) && 'historical' === get_post_meta( $anchor['id'], '_lcrm_state', true ), 'Backfill repairs and verifies legacy institution and state mirrors from the frozen snapshot' );
     $extra = index_capture( $a, '2024-04-02 10:00:00', '0589988776', 'after-boundary@example.invalid' );
@@ -183,6 +199,24 @@ try {
     index_check( is_wp_error( $failed_cursor ) && 500 === $failed_cursor->get_error_data()['status'] && $cursor_state === get_option( 'lcrm_duplicate_index' ) && '0580000000' === get_post_meta( $anchor['id'], '_lcrm_phone_key', true ), 'A failed cursor save rolls back the whole metadata batch and preserves the previous progress' );
     $cursor_retry = LimuCRM\duplicate_index_run();
     index_check( ! is_wp_error( $cursor_retry ) && $cursor_retry['done'] && $original_phone === get_post_meta( $anchor['id'], '_lcrm_phone_key', true ), 'A cursor persistence failure can retry the exact original batch successfully' );
+
+    $database_cursor = index_cursor( $anchor['id'], $anchor['id'] );
+    $uncommitted_target = $database_cursor;
+    $uncommitted_target['cursor'] = $anchor['id'];
+    $uncommitted_target['processed'] = 1;
+    $uncommitted_target['done'] = true;
+    wp_cache_set( 'lcrm_duplicate_index', $uncommitted_target, 'options' );
+    $skipped_write = LimuCRM\duplicate_index_run();
+    index_check( is_wp_error( $skipped_write ) && 500 === $skipped_write->get_error_data()['status'] && $database_cursor === LimuCRM\duplicate_index_read_state(), 'A cached target cannot masquerade as a cursor write that update_option skipped' );
+    $real_write = LimuCRM\duplicate_index_run();
+    index_check( ! is_wp_error( $real_write ) && $uncommitted_target === LimuCRM\duplicate_index_read_state(), 'Retry persists a previously cached-only cursor target to the database' );
+
+    $query_fault = static function ( $query ) { return false !== strpos( $query, 'SELECT option_value FROM' ) && false !== strpos( $query, 'lcrm_duplicate_index' ) ? '' : $query; };
+    add_filter( 'query', $query_fault );
+    $blocked_readiness = LimuCRM\duplicate_component( LimuCRM\raw_records( array( $chain['id'] ) )[0] );
+    $blocked_cursor = LimuCRM\duplicate_index_run();
+    remove_filter( 'query', $query_fault ); $query_fault = null;
+    index_check( is_wp_error( $blocked_readiness ) && 500 === $blocked_readiness->get_error_data()['status'] && is_wp_error( $blocked_cursor ) && 500 === $blocked_cursor->get_error_data()['status'], 'A silently blocked authoritative cursor read cannot enable matching or advance the migration' );
 
     $before_queries = get_option( 'lcrm_duplicate_index' );
     $query_fault = static function ( $query ) { return false !== strpos( $query, 'SELECT DISTINCT p.ID' ) && false !== strpos( $query, 'c.meta_value IN' ) ? 'SELECT missing_index_fixture_column FROM invalid_index_fixture_table' : $query; };

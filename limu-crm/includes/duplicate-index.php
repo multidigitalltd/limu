@@ -35,21 +35,40 @@ function duplicate_index_valid_state( $state ) {
 }
 
 /**
+ * Read the authoritative cursor without options caches populated before commit.
+ *
+ * @return array|null|\WP_Error Current database state, absence, or a safe read error.
+ */
+function duplicate_index_read_state() {
+	global $wpdb;
+	$queries = $wpdb->num_queries;
+	$rows    = $wpdb->get_results( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", 'lcrm_duplicate_index' ), ARRAY_A );
+	if ( $wpdb->num_queries <= $queries || '' !== $wpdb->last_error || ! is_array( $rows ) || count( $rows ) > 1 ) {
+		return error( 'קריאת מצב אינדקס הכפילויות נכשלה.', 500 );
+	}
+	if ( ! $rows ) {
+		return null;
+	}
+	$state = maybe_unserialize( $rows[0]['option_value'] );
+	return duplicate_index_valid_state( $state ) ? $state : error( 'מצב אינדקס הכפילויות אינו תקין.', 409 );
+}
+
+/**
  * Read or initialize the upper bound without doing backfill in a visitor request.
  *
  * @return array|\WP_Error Cursor or a safe persistence error.
  */
 function duplicate_index_state() {
-	$state = get_option( 'lcrm_duplicate_index', null );
+	$state = duplicate_index_read_state();
 	if ( null !== $state ) {
-		return duplicate_index_valid_state( $state ) ? $state : error( 'מצב אינדקס הכפילויות אינו תקין.', 409 );
+		return $state;
 	}
 	return locked(
 		static function () {
 			global $wpdb;
-			$state = get_option( 'lcrm_duplicate_index', null );
+			$state = duplicate_index_read_state();
 			if ( null !== $state ) {
-				return duplicate_index_valid_state( $state ) ? $state : error( 'מצב אינדקס הכפילויות אינו תקין.', 409 );
+				return $state;
 			}
 			$queries = $wpdb->num_queries;
 			$max     = $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(MAX(ID), 0) FROM {$wpdb->posts} WHERE post_type = %s AND post_status = %s", 'lcrm_delivery', 'private' ) );
@@ -65,7 +84,7 @@ function duplicate_index_state() {
 				'done'      => 0 === $max,
 			);
 			update_option( 'lcrm_duplicate_index', $state, false );
-			return get_option( 'lcrm_duplicate_index' ) === $state ? $state : error( 'שמירת אינדקס הכפילויות נכשלה.', 500 );
+			return duplicate_index_read_state() === $state ? $state : error( 'שמירת אינדקס הכפילויות נכשלה.', 500 );
 		}
 	);
 }
@@ -165,7 +184,10 @@ function duplicate_index_run() {
 	$result = locked(
 		static function () {
 			global $wpdb;
-			$state = get_option( 'lcrm_duplicate_index', null );
+			$state = duplicate_index_read_state();
+			if ( is_wp_error( $state ) ) {
+				return $state;
+			}
 			if ( ! duplicate_index_valid_state( $state ) ) {
 				return error( 'מצב אינדקס הכפילויות אינו תקין.', 409 );
 			}
@@ -210,7 +232,7 @@ function duplicate_index_run() {
 				$state['cursor'] = $state['max_id'];
 			}
 			update_option( 'lcrm_duplicate_index', $state, false );
-			return get_option( 'lcrm_duplicate_index' ) === $state ? $state : error( 'שמירת התקדמות האינדקס נכשלה.', 500 );
+			return duplicate_index_read_state() === $state ? $state : error( 'שמירת התקדמות האינדקס נכשלה.', 500 );
 		}
 	);
 	if ( is_wp_error( $result ) ) {
@@ -318,8 +340,11 @@ function duplicate_component( $changed ) {
 	if ( ! duplicate_index_valid_item( $changed, $changed['id'] ?? 0 ) ) {
 		return error( 'פרטי פנייה אינם תקינים להשוואת כפילות.', 409 );
 	}
-	$state = get_option( 'lcrm_duplicate_index', null );
-	if ( ! duplicate_index_valid_state( $state ) || ! $state['done'] ) {
+	$state = duplicate_index_read_state();
+	if ( is_wp_error( $state ) && 500 === ( $state->get_error_data()['status'] ?? 0 ) ) {
+		return $state;
+	}
+	if ( is_wp_error( $state ) || null === $state || ! $state['done'] ) {
 		return duplicate_index_fallback( $changed['institution'] );
 	}
 	$items   = array();

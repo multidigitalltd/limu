@@ -1,8 +1,16 @@
 # Limu CRM — Multi Digital
 
-תוסף WordPress ייעודי לניהול מוסדות, לידים וחיובים. גרסת בדיקות 0.1.9. הממשק בעברית ו־RTL תחת `/crm/`, עם התחברות נפרדת מתצוגת wp-admin. כולל חיבור iCount; לא הותקן באתר החי ולא נשלחו מסמכים לחשבון אמיתי.
+תוסף WordPress ייעודי לניהול מוסדות, לידים וחיובים. גרסת בדיקות 0.1.10. הממשק בעברית ו־RTL תחת `/crm/`, עם התחברות נפרדת מתצוגת wp-admin. כולל חיבור iCount; לא הותקן באתר החי ולא נשלחו מסמכים לחשבון אמיתי.
 
-להתקנה: [תוסף 0.1.9 — ZIP](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.9/limu-crm-0.1.9.zip). דוח הבדיקה: [SECURITY_REVIEW.md](SECURITY_REVIEW.md). מדידות מהירות: [PERFORMANCE.md](PERFORMANCE.md). תיקון שיוך פניות עבר: [MAPPING_REVIEW.md](MAPPING_REVIEW.md).
+להתקנה: [תוסף 0.1.10 — ZIP](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.10/limu-crm-0.1.10.zip). דוח הבדיקה: [SECURITY_REVIEW.md](SECURITY_REVIEW.md). מדידות מהירות: [PERFORMANCE.md](PERFORMANCE.md). תיקון שיוך פניות עבר: [MAPPING_REVIEW.md](MAPPING_REVIEW.md).
+
+גרסאות קודמות וראיות הרצה: [ארכיון חבילות ההתקנה](https://github.com/multidigitalltd/limu/blob/main/downloads/README.md) ו־[ארכיון הראיות](https://github.com/multidigitalltd/limu/blob/main/artifacts/README.md).
+
+## תיקון 0.1.10
+
+מוכנות אינדקס הכפילויות והתקדמות ההשלמה נקראות כעת ישירות מהמסד, לרבות אימות שמירה. מטמון WordPress/Redis ששומר סמן ״הושלם״ לפני commit אינו יכול לדלג על פניות ישנות או להציג שמירת סמן שלא התבצעה. המקרה שוחזר בבדיקה שמצאה פנייה תואמת בטעות כחדשה, ונוספו שש בדיקות רגרסיה. כללי הכפילויות והחיוב נשארים כפי שסוכמו.
+
+עשרה שחרורים ו־22 נכסים אומתו בהורדה ציבורית לפני הוצאת 10 חבילות ZIP ו־140 קובצי ראיות מתוך עץ העבודה. ההיסטוריה נשמרה; הגרסאות והראיות נמצאות ב־Releases. יש להתקין את 0.1.10 הכוללת גם את שינויי 0.1.9 שלהלן.
 
 ## עדכון 0.1.9
 

@@ -1,4 +1,15 @@
-# אימות גרסת 0.1.7
+# אימות CRM — 0.1.10
+
+## תיקון 0.1.10 — בדיקת מוכנות האינדקס
+
+כל 14 סוויטות השרת הורצו מחדש ברצף ב־PHP 7.4.33 וב־PHP 8.4.26: **821 assertions בכל runtime**, כולל 43 באינדקס הכפילויות. בדיקת תשלום מקביל עברה לאחר הכנת fixtures טריים בכל אחת מהסביבות. הסוויטות הנוספות נשארו במספרים של 0.1.9 להלן.
+
+לפני התיקון הזרקת סמן completed תקין־לכאורה למטמון, מול אינדקס היסטורי חסר במסד, גרמה לפנייה חוזרת להישמר כייחודית. אותו repro עובר לאחר התיקון. הבדיקות הנוספות מאמתות מקור סמכות במסד ב־init וב־cron, סמן כתיבה ש־update_option דילג עליו בגלל מטמון זהה, retry וכשל קריאה שקט. סקירה עצמאית של התיקון הסתיימה ללא חסם נוסף.
+
+Lint בשתי גרסאות PHP ו־WPCS נקיים, ו־JS/build עברו ללא שינוי בנכסי הממשק. החבילה החדשה מכילה 23 קובצי runtime, **229,665 בתים**, SHA256 `1513fa678799e32c97da04b2306a53aacfc712e737cffdff6edbc426c8fa5dda`. ההפצה מריצה שוב גם את סוויטות הדפדפן ב־Actions לפני פרסום.
+
+הגירת הארכיונים הושלמה: 10 שחרורים ו־22 נכסים עברו אימות ציבורי עצמאי, וכל 140 רשומות ארכיון הראיות הושוו לקומיט המקורי. רק אז הוסרו 151 קבצים מנוהלים מעץ העבודה: 10 ZIPs, קובץ חתימות ו־140 ראיות, 2,271,742 בתים. קובצי המשתמש המקומיים והיסטוריית Git נשמרו. ההפניות ההיסטוריות עודכנו ל־Releases; תוצרים חדשים נשמרים מחוץ ל־Git.
+
 
 ## עדכון 0.1.9 — בדיקות סביבת העבודה
 
@@ -16,7 +27,7 @@
 
 הרצת PHP 7.4 הראשונית מצאה שני פערי fixture ומיפוי לאחר המעבר ל־snapshots: מיפוי מאוחר השתמש בשמות שדות פרטי קשר שלא קיימים ב־snapshot, ו־fixture שבכוונה שומר מפתח טלפון פגום נדחה כעת על ידי אימות הכתיבה. המיפוי תוקן לשימוש במפתחות הקפואים; בדיקת ההיסטוריה מזריקה פגם מכוון רק לאחר שמירת רשומה תקינה. הסוויטות שנכשלו הורצו מחדש בהצלחה, ללא הקלת אימות הייצור. השוואת idempotence בבדיקת ההחרגה עודכנה להשוואת שני snapshots גולמיים, במקום snapshot מול תוצאת hydration.
 
-הסקריפטים החדשים של GitHub Actions נבדקו מקומית בהתקנת WordPress טרייה. תוצאות הרצת Actions והפצת הקבצים מתועדות בנפרד לאחר הפרסום. לוגים מקומיים שמורים מחוץ למאגר; הרצות Actions שומרות לוגים, צילומים וחבילה כ־artifacts ל־14 יום. לא הותקן קוד באתר החי ולא הופקו מסמכים אמיתיים.
+הסקריפטים החדשים של GitHub Actions נבדקו מקומית בהתקנת WordPress טרייה. הרצת [GitHub Actions 39398805142](https://github.com/multidigitalltd/limu/actions/runs/39398805142) עברה במלואה על הקומיט `926764771aa47dede883526d292bd7b5667ca10a`: שתי סביבות הבדיקה, פרסום חבילת 0.1.9 וארכוב תשע הגרסאות הקודמות. הורדה ציבורית ללא התחברות אומתה בנפרד: 229,503 בתים, אותה חתימת SHA256 וכל 23 קובצי ההפעלה זהים לקוד שנבדק. תקלות פקודת health check וגילוי draft בתהליך CI הראשוני תוקנו; שתיהן היו בתשתית הבדיקות והפרסום ולא בקוד התוסף. לוגים מקומיים שמורים מחוץ למאגר; הרצות Actions שומרות לוגים, צילומים וחבילה כ־artifacts ל־14 יום. לא הותקן קוד באתר החי ולא הופקו מסמכים אמיתיים.
 
 
 ## עדכון 0.1.8 — עיצוב ותקופת כפילות לפי מוסד
@@ -32,7 +43,7 @@
 - כל 13 קובצי PHP עברו lint בשתי הגרסאות; PHPCS/WPCS עבר ללא שגיאות ואזהרות; בנייה ותחביר JavaScript עברו. `npm audit` לא דיווח על חולשות ידועות בתלויות הפיתוח המותקנות.
 - הוסרה פונקציית ההתאמה הישנה שלא שימשה עוד בקוד הייצור, וסגנונות העיצוב הקודמים הוחלפו. התאמה לפי טלפון ואימייל משתמשת באינדקס בזיכרון במקום השוואה לכל אנשי הקשר; בדיקה מבודדת מוצאת שני מועמדים רלוונטיים מתוך 10,000. סריקת כפילויות אינה טוענת פרטי קשר שלא לצורך.
 
-ראיות ההרצות: `artifacts/*-0.1.8-php74.txt`, `artifacts/*-0.1.8-php84.txt`, `artifacts/static-checks-0.1.8.txt`, `artifacts/dependency-audit-0.1.8.json`. בדיקות PHP המשיקות לניקוי הפונקציה הורצו מחדש לאחר הניקוי. כל סוויטות המסד והדפדפן הורצו ברצף.
+ראיות ההרצות: [artifacts/\*-0.1.8-php74.txt (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip), [artifacts/\*-0.1.8-php84.txt (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip), [artifacts/static-checks-0.1.8.txt (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip), [artifacts/dependency-audit-0.1.8.json (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip). בדיקות PHP המשיקות לניקוי הפונקציה הורצו מחדש לאחר הניקוי. כל סוויטות המסד והדפדפן הורצו ברצף.
 
 לא בוצעה התקנה באתר החי, לא שונו חיובים או פניות אמיתיים, ולא הופקו מסמכים בחשבון iCount אמיתי. מדידות PageSpeed של האתר החי לא בוצעו.
 
@@ -41,29 +52,29 @@
 
 ## עדכון 0.1.7 — שיוך וספירת פניות
 
-כל תשע סוויטות השרת הורצו מחדש ברצף, בנפרד על PHP 7.4.33 ועל PHP 8.4.26: **590 assertions בכל runtime** — אינטגרציה 60, אבטחה/כספים/ייצוא 123, התחברות 13, קליטה אוטומטית 28, כפילויות 55, טווחים וספירות 120, iCount 80, מיפוי מקורות 53 ותיקון היסטוריה 58. גם בדיקת תשלומים מקבילים עברה בשתי הסביבות. לוגים: `artifacts/{suite}-0.1.7-php74.txt` ו־`artifacts/{suite}-0.1.7-php84.txt`.
+כל תשע סוויטות השרת הורצו מחדש ברצף, בנפרד על PHP 7.4.33 ועל PHP 8.4.26: **590 assertions בכל runtime** — אינטגרציה 60, אבטחה/כספים/ייצוא 123, התחברות 13, קליטה אוטומטית 28, כפילויות 55, טווחים וספירות 120, iCount 80, מיפוי מקורות 53 ותיקון היסטוריה 58. גם בדיקת תשלומים מקבילים עברה בשתי הסביבות. לוגים: [artifacts/{suite}-0.1.7-php74.txt (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip) ו־[artifacts/{suite}-0.1.7-php84.txt (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip).
 
 המיפוי נבדק מול HTML ורווחים, כתובת מוסד, קשרי course/study, מוסד טיוטה, כמה מקבלים, הורים סותרים, שמות עמומים ומזהים מספריים. בדיקות SQL מכוונות אימתו כשל בטוח במיפוי ובלקיחת snapshot, בלי לחשוף SQL ובלי להפוך עמימות לשיוך.
 
 תיקון ההיסטוריה נבדק מול חיוב מאושר אמיתי במסד הדמה, עריכת טלפון/אימייל ותאריך בליד המקור, שמירת הערות/טיפול/כלל כפילות, מקבל קיים, ניסיון חוזר, כשל מקבל שני, סגירת חריג ו־commit. כשלי קריאה ושמירה השאירו את הרשומות ואת סמן האצווה ללא שינוי. נבדקו גם גבול 50 רשומות, גבול מזהים קפוא, היעדר REST לתיקון, היעדר HTTP/מסמכים ויומן המכיל מספרים בלבד.
 
-הפונקציות בפועל נבדקו בשתי גרסאות PHP מול מבנה המקורות הציבורי של הגיבוי בקריאה בלבד, בלי שחזור מסד פונים: 161 מקורות נוספים משויכים ל־194 מקבלים, ללא איבוד או שינוי של מקבל קודם. מספר פניות המקור נשאר 4,622, פניות למוסדות 4,202, ו־601 חריגים נשארים ללא שיוך ברור. ראיה מצרפית: `artifacts/source-mapping-backup-0.1.7.json`.
+הפונקציות בפועל נבדקו בשתי גרסאות PHP מול מבנה המקורות הציבורי של הגיבוי בקריאה בלבד, בלי שחזור מסד פונים: 161 מקורות נוספים משויכים ל־194 מקבלים, ללא איבוד או שינוי של מקבל קודם. מספר פניות המקור נשאר 4,622, פניות למוסדות 4,202, ו־601 חריגים נשארים ללא שיוך ברור. ראיה מצרפית: [artifacts/source-mapping-backup-0.1.7.json (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip).
 
-כל 13 קובצי PHP של התוסף עברו תחביר בשתי הגרסאות. PHPCS/WPCS: אפס שגיאות ואפס אזהרות. הבנייה ותחביר JavaScript עברו; טביעות של שלושת הנכסים תואמות לתוכן הקבצים. npm audit לא מצא פגיעויות ידועות בתלויות הפיתוח; הפלט ב־`artifacts/dependency-audit-0.1.7.json`.
+כל 13 קובצי PHP של התוסף עברו תחביר בשתי הגרסאות. PHPCS/WPCS: אפס שגיאות ואפס אזהרות. הבנייה ותחביר JavaScript עברו; טביעות של שלושת הנכסים תואמות לתוכן הקבצים. npm audit לא מצא פגיעויות ידועות בתלויות הפיתוח; הפלט ב־[artifacts/dependency-audit-0.1.7.json (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip).
 
-**116 בדיקות דפדפן בכל runtime** עברו: ממשק ונגישות 42, תגובות frontend מדומות 39, תאימות קאש 6 ו־iCount frontend 29. נבדקו פירוט שוטף/היסטוריה, fallback לנתונים ישנים, באנר חריגים רק למנהל, כותרות הסינון, מעבר לרשימת החריגים עם אותו טווח, היעלמות הבאנר ללא חריגים, ערכי ספירה עוינים, מובייל ו־RTL. קריאות cookie אמיתיות אימתו בידוד מוסדות ודרישת nonce. הצילומים עודכנו עם נתוני דמה בלבד; לוגים: `artifacts/{browser|frontend-review|settings-cache|icount-frontend}-0.1.7-{php74|php84}.txt`.
+**116 בדיקות דפדפן בכל runtime** עברו: ממשק ונגישות 42, תגובות frontend מדומות 39, תאימות קאש 6 ו־iCount frontend 29. נבדקו פירוט שוטף/היסטוריה, fallback לנתונים ישנים, באנר חריגים רק למנהל, כותרות הסינון, מעבר לרשימת החריגים עם אותו טווח, היעלמות הבאנר ללא חריגים, ערכי ספירה עוינים, מובייל ו־RTL. קריאות cookie אמיתיות אימתו בידוד מוסדות ודרישת nonce. הצילומים עודכנו עם נתוני דמה בלבד; לוגים: [artifacts/{browser|frontend-review|settings-cache|icount-frontend}-0.1.7-{php74|php84}.txt (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip).
 
 ## עדכון 0.1.6 — הרצה מלאה
 
 כל הסוויטות הורצו מחדש ברצף, בנפרד על PHP 7.4.33 ועל PHP 8.4.26:
 
-- **479 בדיקות שרת בכל runtime**: אינטגרציה 60, אבטחה/כספים/ייצוא 123, התחברות 13, קליטה אוטומטית 28, כפילויות 55, טווחים וספירות 120 ו־iCount 80. לוגים: `artifacts/{suite}-0.1.6-php74.txt` ו־`artifacts/{suite}-0.1.6-php84.txt`.
+- **479 בדיקות שרת בכל runtime**: אינטגרציה 60, אבטחה/כספים/ייצוא 123, התחברות 13, קליטה אוטומטית 28, כפילויות 55, טווחים וספירות 120 ו־iCount 80. לוגים: [artifacts/{suite}-0.1.6-php74.txt (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip) ו־[artifacts/{suite}-0.1.6-php84.txt (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip).
 - **110 בדיקות דפדפן בכל runtime**: ממשק ונגישות 40, frontend עם תגובות מדומות 35, קאש ותאימות 6 ו־iCount frontend 29. נוספו בדיקות cookie אמיתיות לקריאת REST ללא nonce ולניסיון מוסד לייצא/לקרוא מוסד זר, ובדיקת דוח שמתעכב בזמן החלפת הסינון.
-- בקשות תשלום מקבילות יצרו תשלום אחד ושינו את היתרה פעם אחת בשני runtimes. לוגים: `artifacts/concurrency-0.1.6-php74.txt` ו־`artifacts/concurrency-0.1.6-php84.txt`.
+- בקשות תשלום מקבילות יצרו תשלום אחד ושינו את היתרה פעם אחת בשני runtimes. לוגים: [artifacts/concurrency-0.1.6-php74.txt (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip) ו־[artifacts/concurrency-0.1.6-php84.txt (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip).
 - כל 12 קובצי PHP של התוסף עברו בדיקת תחביר בשתי הגרסאות. PHPCS/WPCS על כל מקורות PHP: אפס שגיאות ואפס אזהרות. בניית esbuild ותחביר JS עברו.
-- `npm audit --package-lock-only --ignore-scripts --json` לא מצא פגיעויות ידועות ב־31 תלויות הפיתוח. הפלט המקורי נשמר ב־`artifacts/dependency-audit-0.1.6.json`.
-- מדידות לפני/אחרי עם 4,622 פניות מקור ו־4,770 רישומים אימתו תגובות זהות בסיכום שנתי, טווח, מוסד, חשבון מוסדות ו־bootstrap בשתי גרסאות PHP. סיכום שנתי ירד מ־56 ל־26 שאילתות, ללא טעינת פרטי קשר של פונים. מתודולוגיה ותוצאות מלאות: `PERFORMANCE.md` ו־`artifacts/performance-0.1.6.json`.
-- הממשק המעודכן נבדק חזותית; צילומי הדמה `artifacts/dashboard.png` ו־`artifacts/mobile.png` עודכנו. מטא מסמך, שדות מתשלום ומסמכי iCount נבדקו עם ספק מדומה בלבד.
+- `npm audit --package-lock-only --ignore-scripts --json` לא מצא פגיעויות ידועות ב־31 תלויות הפיתוח. הפלט המקורי נשמר ב־[artifacts/dependency-audit-0.1.6.json (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip).
+- מדידות לפני/אחרי עם 4,622 פניות מקור ו־4,770 רישומים אימתו תגובות זהות בסיכום שנתי, טווח, מוסד, חשבון מוסדות ו־bootstrap בשתי גרסאות PHP. סיכום שנתי ירד מ־56 ל־26 שאילתות, ללא טעינת פרטי קשר של פונים. מתודולוגיה ותוצאות מלאות: `PERFORMANCE.md` ו־[artifacts/performance-0.1.6.json (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip).
+- הממשק המעודכן נבדק חזותית; צילומי הדמה [artifacts/dashboard.png (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip) ו־[artifacts/mobile.png (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip) עודכנו. מטא מסמך, שדות מתשלום ומסמכי iCount נבדקו עם ספק מדומה בלבד.
 
 התיקונים והיקף הסקירה מפורטים ב־`SECURITY_REVIEW.md`. לא בוצעו שינוי נתוני ייצור, התקנה באתר החי, שליחת פניות או הפקת מסמכים אמיתיים.
 
@@ -71,9 +82,9 @@
 
 הסקירה מפצלת פניות מקור שהאתר קיבל ופניות לכל מוסד מקבל. פניות ללא שיוך וקליטה שלא הושלמה נכללות בספירת המקור ובחיוויים נפרדים, ולא במדד המוסדות או בגרף. כל הספירות כפופות לאותו סינון ואכיפת הרשאות; חשבון מוסד מקבל כותרת ״פניות מקור״ וסיכומים בתחום המוסדות המורשים שלו בלבד. ההסרה של הכיתוב בהגדרות iCount מ־0.1.4 נשמרת.
 
-- 120 בדיקות טווחי תאריכים וספירות עברו ב־PHP 7.4.33 וב־PHP 8.4.26: 98 בדיקות קיימות ו־22 חדשות. נבדקו פנייה לכמה מוסדות, שתי פניות נפרדות של אותו אדם, ייבוא חוזר, החרגת טיוטה, פניות ללא שיוך, הרשאות מוסד, סינון ומעבר בין אצוות של 500 רשומות. הלוגים: `artifacts/date-range-0.1.5.txt` ו־`artifacts/date-range-0.1.5-php84.txt`.
-- 60 בדיקות אינטגרציה עברו מחדש בכל אחת מגרסאות PHP. הלוגים: `artifacts/integration-0.1.5.txt` ו־`artifacts/integration-0.1.5-php84.txt`.
-- 38 בדיקות דפדפן ונגישות ו־34 בדיקות ממשק עם תגובות מדומות עברו בכל אחת מגרסאות PHP, ברצף. נבדקו שני המדדים מול ה־API, כותרות וספירות בסינון, חשבון מוסד, הצגת תוכן עוין כטקסט בלבד ופריסה בנייד. הלוגים: `artifacts/browser-0.1.5*.txt` ו־`artifacts/frontend-review-0.1.5*.txt`. צילומי הדמה `artifacts/dashboard.png` ו־`artifacts/mobile.png` עודכנו ונבדקו חזותית.
+- 120 בדיקות טווחי תאריכים וספירות עברו ב־PHP 7.4.33 וב־PHP 8.4.26: 98 בדיקות קיימות ו־22 חדשות. נבדקו פנייה לכמה מוסדות, שתי פניות נפרדות של אותו אדם, ייבוא חוזר, החרגת טיוטה, פניות ללא שיוך, הרשאות מוסד, סינון ומעבר בין אצוות של 500 רשומות. הלוגים: [artifacts/date-range-0.1.5.txt (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip) ו־[artifacts/date-range-0.1.5-php84.txt (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip).
+- 60 בדיקות אינטגרציה עברו מחדש בכל אחת מגרסאות PHP. הלוגים: [artifacts/integration-0.1.5.txt (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip) ו־[artifacts/integration-0.1.5-php84.txt (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip).
+- 38 בדיקות דפדפן ונגישות ו־34 בדיקות ממשק עם תגובות מדומות עברו בכל אחת מגרסאות PHP, ברצף. נבדקו שני המדדים מול ה־API, כותרות וספירות בסינון, חשבון מוסד, הצגת תוכן עוין כטקסט בלבד ופריסה בנייד. הלוגים: [artifacts/browser-0.1.5\*.txt (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip) ו־[artifacts/frontend-review-0.1.5\*.txt (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip). צילומי הדמה [artifacts/dashboard.png (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip) ו־[artifacts/mobile.png (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip) עודכנו ונבדקו חזותית.
 - בניית הנכסים ותחביר JavaScript עברו, וקובץ ה־API עבר בדיקת תחביר בשתי גרסאות PHP. PHPCS/WPCS לכל קובצי PHP ששונו: אפס שגיאות ואפס אזהרות.
 - אלה 180 בדיקות שרת ו־72 בדיקות דפדפן לכל runtime בעדכון זה. סוויטות השרת המלאות של 0.1.3 לא הורצו מחדש; תוצאותיהן נשמרות להלן בנפרד.
 - לא בוצעו שינוי נתוני לידים או חיובים באתר החי. בדיקות הספירה מאמתות שגם קריאת הדוח אינה משנה חיובים מאושרים.
@@ -82,7 +93,7 @@
 
 הוסרו ממסך הגדרות iCount תיאור המסמכים וההסבר על הגדרת מפתח ה־API בשרת. הגדרת החיבור עצמה לא השתנתה; הוראות ההתקנה נשארות בתיעוד.
 
-- 29 בדיקות ממשק iCount עברו מחדש ב־PHP 7.4.33, ו־29 ב־PHP 8.4.26, ברצף ועם ספק מדומה בלבד. הלוגים: `artifacts/icount-frontend-0.1.4.txt` ו־`artifacts/icount-frontend-0.1.4-php84.txt`.
+- 29 בדיקות ממשק iCount עברו מחדש ב־PHP 7.4.33, ו־29 ב־PHP 8.4.26, ברצף ועם ספק מדומה בלבד. הלוגים: [artifacts/icount-frontend-0.1.4.txt (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip) ו־[artifacts/icount-frontend-0.1.4-php84.txt (בתוך ZIP)](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip).
 - בניית הנכסים ותחביר JavaScript עברו. PHPCS/WPCS לקובצי PHP ששונו: אפס שגיאות ואפס אזהרות.
 - לא בוצעה הרצה חוזרת של סוויטות השרת המלאות עבור שינוי הכיתוב. תוצאות הבסיס של 0.1.3 מפורטות להלן.
 
@@ -100,7 +111,7 @@
 - בריצות axe לא נמצאו violations בכללי WCAG A/AA שנבדקו. זו בדיקה אוטומטית של המסכים, ואינה מחליפה בדיקה ידנית או אישור נגישות.
 - בדיקת מיפוי מול הגיבוי המקורי: 3,860 רשומות ניתנות לשיוך מדויק, עם 4,008 שיוכי מוסד; 66 רשומות משויכות לכמה מוסדות. 760 רשומות בעלות ערך מוסד לא ממופה ועוד שתיים ללא מטא מוסד. זו בדיקת מיפוי בלבד, ללא שליחה או חיוב.
 
-לוגי התוצאות וצילומי הדמה נמצאים ב־`artifacts/`.
+לוגי התוצאות וצילומי הדמה נמצאים ב־[ZIP הראיות ההיסטוריות](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip), תחת `artifacts/`.
 
 ## הרצה חוזרת בסביבת Codex הנוכחית
 
@@ -139,12 +150,12 @@ LIMU_TEST_URL=http://127.0.0.1:8091 LIMU_TEST_LOGIN=/workspace/.limu-tools/test-
 - החיבור ל־iCount מומש ונבדק עם HTTP מדומה לפי התיעוד הרשמי. לא בוצעו התחברות לחשבון אמיתי, יצירת לקוח או הפקת מסמך אמיתי. sandbox ואלגוריתם העיגול המלא אינם מפורטים בתיעוד שקראנו. הפעלה אמיתית דורשת טוקן שרת ובדיקת חשבון בדיקות. כרטיס ואמצעי תשלום כלליים אינם מחוברים להפקת קבלה; מזומן, העברה והמחאה נתמכים. זיכויים וביטולים נעשים ב־iCount עצמו.
 - Turnstile נבדק עם תגובות ספק מדומות, כולל כשל טוקן/action ושמירת TLS. לא בוצעה בדיקה מול חשבון Cloudflare פעיל.
 - לא אומתו PageSpeed/Core Web Vitals באתר החי, תוספי הקאש, SMTP, כל גרסאות WordPress/PHP המינימליות, restore של גיבוי הייצור או restoration במשימת Codex חדשה.
-- לא בוצעו התקנה/פרסום באתר החי או פרסום snapshot של סביבת Codex. גרסה 0.1.7 נועדה להתקנה מתוך ZIP העדכון במאגר; אין כאן שינוי ישיר באתר החי.
+- לא בוצעו התקנה/פרסום באתר החי או פרסום snapshot של סביבת Codex. גרסה 0.1.7 נועדה להתקנה מתוך [ZIP העדכון של 0.1.7](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.7/limu-crm-0.1.7.zip); אין כאן שינוי ישיר באתר החי.
 
 ## אימות PHP 7.4.33
 
 הריצה בוצעה בבינארי PHP 7.4.33 אמיתי עם mysqli, JSON, XML, ctype, mbstring, tokenizer ו־ZipArchive. החבילות המקומיות אומתו באמצעות חתימת Debian וה־SHA256 של האינדקסים ושל החבילות. זהו runtime לבדיקת תאימות בלבד, לא המלצה להתקנת חבילת PHP ישנה על הייצור. ראיות אימות נשמרו מחוץ ל־Git בסביבת הכלים.
 
-סוויטות הבדיקות האחרונות הושלמו בהצלחה בשתי הסביבות. לוגי ריצות וכשלים זמניים אינם אישור לאימות שעבר; תוצאות הסוויטות הנוכחיות נשמרות ב־artifacts. קובצי native.txt ו־php74-lint.txt הישנים נשמרו כראיות לגרסאות קודמות; הריצה הנוכחית היא native-capture*.txt ו־php-lint*.txt.
+סוויטות הבדיקות האחרונות הושלמו בהצלחה בשתי הסביבות. לוגי ריצות וכשלים זמניים אינם אישור לאימות שעבר; תוצאות הסוויטות המתוארות בסעיף זה נשמרות ב־[ZIP הראיות ההיסטוריות](https://github.com/multidigitalltd/limu/releases/download/crm-v0.1.8/limu-crm-evidence-through-0.1.8.zip). קובצי native.txt ו־php74-lint.txt הישנים נשמרו כראיות לגרסאות קודמות; הריצה הנוכחית היא native-capture*.txt ו־php-lint*.txt.
 
 ה־patch לתבנית הבת נבדק ב־dry-run מול העותק שהתקבל בגיבוי; הוא לא הותקן ולא נבדקה תאימות מלאה של התבנית ל־PHP 8. דוח הסקירה: `SECURITY_REVIEW.md`.

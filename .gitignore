@@ -9,3 +9,7 @@ node_modules/
 __pycache__/
 *.pyc
 artifacts/*.pdf
+/downloads/*
+!/downloads/README.md
+/artifacts/*
+!/artifacts/README.md
