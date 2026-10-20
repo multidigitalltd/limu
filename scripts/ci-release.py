@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+from urllib.parse import quote
 import zipfile
 
 REPOSITORY = Path(__file__).resolve().parents[1]
@@ -44,8 +45,15 @@ def blob(path):
     return subprocess.check_output(["git", "show", f"{LEGACY_COMMIT}:{path}"], cwd=REPOSITORY)
 
 
-def api(path, missing_ok=False):
-    result = subprocess.run(["gh", "api", path, "--header", "Cache-Control: no-cache"], cwd=REPOSITORY, text=True, capture_output=True)
+def api(path, missing_ok=False, method="GET", payload=None, upload=None):
+    arguments = ["gh", "api", path, "--method", method, "--header", "Cache-Control: no-cache"]
+    body = None
+    if payload is not None:
+        arguments.extend(["--input", "-"])
+        body = json.dumps(payload)
+    if upload is not None:
+        arguments.extend(["--header", "Content-Type: application/octet-stream", "--input", str(upload)])
+    result = subprocess.run(arguments, input=body, cwd=REPOSITORY, text=True, capture_output=True)
     if result.returncode:
         if missing_ok and "HTTP 404" in result.stderr:
             return None
@@ -130,15 +138,19 @@ def legacy(output):
 
 
 def verify_tag(tag, target, missing_ok=False):
-    reference = api(f"repos/{PROJECT}/git/ref/tags/{tag}", missing_ok)
-    if reference is None:
+    # Read Git refs directly so a previous REST 404 cannot hide a newly published tag.
+    ref = "refs/tags/" + tag
+    lines = run(["git", "ls-remote", "--tags", "https://github.com/" + PROJECT + ".git", ref, ref + "^{}"]).splitlines()
+    references = {line.split()[1]: line.split()[0] for line in lines}
+    if not references and missing_ok:
         return
-    object_ = reference["object"]
-    for _ in range(3):
-        if object_["type"] != "tag":
-            break
-        object_ = api(f"repos/{PROJECT}/git/tags/{object_['sha']}")["object"]
-    require(object_["type"] == "commit" and object_["sha"] == target, "An existing tag points at a different commit.")
+    require(references.get(ref + "^{}", references.get(ref)) == target, "A release tag is missing or points at a different commit.")
+
+
+def download_asset(asset, destination):
+    with destination.open("wb") as output:
+        result = subprocess.run(["gh", "api", f"repos/{PROJECT}/releases/assets/{asset['id']}", "--header", "Accept: application/octet-stream"], cwd=REPOSITORY, stdout=output, stderr=subprocess.PIPE)
+    require(result.returncode == 0, "Could not download the release asset by its verified ID.")
 
 
 def publish(release):
@@ -147,36 +159,43 @@ def publish(release):
     verify_tag(tag, release["target_commit"], True)
     remote = release_by_tag(tag)
     if remote is None:
-        run(["gh", "release", "create", tag, "--repo", PROJECT, "--target", release["target_commit"], "--draft", "--latest=false", "--title", release["title"], "--notes-file", str(directory / "notes.md")])
-        remote = release_by_tag(tag)
-    require(remote is not None, "The requested draft is not visible to the publishing token.")
+        # Keep the POST response ID; drafts need not be visible in tag/list indexes yet.
+        remote = api(f"repos/{PROJECT}/releases", method="POST", payload={
+            "tag_name": tag, "target_commitish": release["target_commit"],
+            "name": release["title"], "body": (directory / "notes.md").read_text(),
+            "draft": True, "prerelease": False, "make_latest": "false",
+        })
     require(remote["target_commitish"] == release["target_commit"] and not remote["prerelease"], "Release metadata does not match the reviewed commit.")
     if remote["draft"]:
         require(remote["name"] == release["title"] and release["marker"] in (remote["body"] or ""), "Refusing to change an unrelated draft.")
     expected = {asset["name"] for asset in release["assets"]}
     actual = [asset["name"] for asset in remote["assets"]]
     require(len(actual) == len(set(actual)) and set(actual) <= expected, "Unexpected release assets; nothing was overwritten.")
+    assets_by_name = {asset["name"]: asset for asset in remote["assets"]}
     for asset in release["assets"]:
         require(digest(directory / asset["name"]) == asset["sha256"], "Local asset changed before publication.")
         if asset["name"] not in actual:
             require(remote["draft"], "Published release is missing an asset; refusing to modify it.")
-            run(["gh", "release", "upload", tag, str(directory / asset["name"]), "--repo", PROJECT])
-    remote = release_by_tag(tag)
-    require(remote is not None, "The release disappeared during upload.")
-    require({a["name"] for a in remote["assets"]} == expected, "Release asset set mismatch.")
+            upload_url = f"https://uploads.github.com/repos/{PROJECT}/releases/{remote['id']}/assets?name=" + quote(asset["name"], safe="")
+            uploaded = api(upload_url, method="POST", upload=directory / asset["name"])
+            require(uploaded["name"] == asset["name"] and uploaded["size"] == asset["bytes"], "Uploaded asset metadata does not match the source.")
+            assets_by_name[asset["name"]] = uploaded
+    require(set(assets_by_name) == expected, "Release asset set mismatch.")
     verification = directory / "downloaded"
     verification.mkdir(exist_ok=True)
-    run(["gh", "release", "download", tag, "--repo", PROJECT, "--dir", str(verification), "--clobber"])
     for asset in release["assets"]:
         downloaded = verification / asset["name"]
+        download_asset(assets_by_name[asset["name"]], downloaded)
         require(downloaded.stat().st_size == asset["bytes"] and digest(downloaded) == asset["sha256"], "Uploaded asset differs from the verified source.")
-        asset["url"] = next(a["browser_download_url"] for a in remote["assets"] if a["name"] == asset["name"])
+        asset["url"] = assets_by_name[asset["name"]]["browser_download_url"]
+        asset["release_asset_id"] = assets_by_name[asset["name"]]["id"]
         asset["download_sha256"] = digest(downloaded)
     if remote["draft"]:
-        run(["gh", "release", "edit", tag, "--repo", PROJECT, "--draft=false", "--latest=" + str(not release["legacy"]).lower()])
-    remote = release_by_tag(tag)
-    require(remote is not None, "The release disappeared during publication.")
+        remote = api(f"repos/{PROJECT}/releases/{remote['id']}", method="PATCH", payload={"draft": False, "make_latest": str(not release["legacy"]).lower()})
     require(not remote["draft"], "Release remained a draft.")
+    require(len(remote["assets"]) == len(expected) and {a["name"] for a in remote["assets"]} == expected, "Published release asset set mismatch.")
+    for asset in release["assets"]:
+        asset["url"] = next(a["browser_download_url"] for a in remote["assets"] if a["name"] == asset["name"])
     verify_tag(tag, release["target_commit"])
     release.update(verified=True, release_id=remote["id"], url=remote["html_url"])
     print("VERIFIED", tag, len(release["assets"]), "assets", flush=True)
