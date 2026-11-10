@@ -192,22 +192,23 @@ function period_filters( $request ) {
  * @return mixed Operation result or validation error.
  */
 function read_api( $request ) {
-	foreach ( array( 'target', 'institution', 'month', 'year', 'date_from', 'date_to', 'state', 'billing_status', 'page', 'search' ) as $key ) {
+	foreach ( array( 'target', 'institution', 'month', 'year', 'date_from', 'date_to', 'state', 'billing_status', 'duplicate_status', 'page', 'search' ) as $key ) {
 		$value = $request->get_param( $key );
 		if ( null !== $value && ! is_scalar( $value ) ) {
 			return error( 'פרמטר לא תקין.' );
 		}
 		$limits = array(
-			'target'         => 20,
-			'institution'    => 10,
-			'month'          => 7,
-			'year'           => 4,
-			'date_from'      => 10,
-			'date_to'        => 10,
-			'state'          => 30,
-			'billing_status' => 20,
-			'page'           => 7,
-			'search'         => 200,
+			'target'           => 20,
+			'institution'      => 10,
+			'month'            => 7,
+			'year'             => 4,
+			'date_from'        => 10,
+			'date_to'          => 10,
+			'state'            => 30,
+			'billing_status'   => 20,
+			'duplicate_status' => 20,
+			'page'             => 7,
+			'search'           => 200,
 		);
 		if ( null !== $value && ( is_bool( $value ) || strlen( (string) $value ) > $limits[ $key ] ) ) {
 			return error( 'פרמטר לא תקין.' );
@@ -274,7 +275,14 @@ function read_api( $request ) {
 	if ( null !== $billing_status && '' !== $billing_status && 'deliveries' !== $target ) {
 		return error( 'סינון מצב חיוב זמין רק לפניות.' );
 	}
+	$duplicate_status = $request->get_param( 'duplicate_status' );
+	if ( null !== $duplicate_status && '' !== $duplicate_status && ( 'deliveries' !== $target || ! in_array( $duplicate_status, array( 'unique', 'duplicates' ), true ) ) ) {
+		return error( 'סינון כפילויות לא תקין.' );
+	}
 	$filters = $period;
+	if ( $duplicate_status ) {
+		$filters['duplicate_status'] = $duplicate_status;
+	}
 	if ( 'excluded' === $billing_status ) {
 		$filters['billing_status'] = $billing_status;
 	}
@@ -369,7 +377,12 @@ function write_api( $request ) {
 		if ( array_key_exists( 'duplicate_mode', $input ) || array_key_exists( 'duplicate_days', $input ) ) {
 			return error( 'זיהוי כפילויות מוגדר כעת לכל מוסד בנפרד. יש לרענן את העמוד ולשמור מתוך כרטיס המוסד.', 409 );
 		}
-		$old = settings();
+		$old       = settings();
+		$retention = array_key_exists( 'audit_retention_days', $input ) ? $input['audit_retention_days'] : $old['audit_retention_days'];
+		if ( ! is_int( $retention ) || $retention < 0 || $retention > 36500 ) {
+			return error( 'יש להזין מספר ימים שלם בין 0 ל־36500.' );
+		}
+
 		if ( '' !== $old['start_date'] && $old['start_date'] !== $start ) {
 			$q = query_records( 'lcrm_bill', array( 'state' => 'approved' ), 1, 1 );
 			if ( $q['total'] ) {
@@ -377,9 +390,10 @@ function write_api( $request ) {
 			}
 		}
 		// Retain retired global values for upgrade compatibility; captures never inherit them.
-		$new               = $old;
-		$new['automatic']  = ! empty( $input['automatic'] );
-		$new['start_date'] = $start;
+		$new                         = $old;
+		$new['automatic']            = ! empty( $input['automatic'] );
+		$new['start_date']           = $start;
+		$new['audit_retention_days'] = $retention;
 		update_option( 'lcrm_settings', $new, false );
 		if ( get_option( 'lcrm_settings' ) !== $new ) {
 			return error( 'שמירת ההגדרות נכשלה.', 500 );
@@ -388,7 +402,8 @@ function write_api( $request ) {
 			'settings_changed',
 			0,
 			array(
-				'automatic' => $new['automatic'],
+				'automatic'            => $new['automatic'],
+				'audit_retention_days' => $retention,
 			)
 		);
 		return $new;
@@ -693,7 +708,7 @@ function summary( $request ) {
 			return error( 'אין הרשאה למוסד.', 403 );
 		} $filters['institution'] = $iid;
 	}
-	$out      = array(
+	$out                       = array(
 		'leads'                  => 0,
 		'received_leads'         => 0,
 		'institution_leads'      => 0,
@@ -710,7 +725,11 @@ function summary( $request ) {
 		'overdue'                => 0,
 		'by_institution'         => array(),
 	);
-	$received = array();
+	$out['unbilled']           = 0;
+	$out['missing_rate_leads'] = 0;
+	$configs                   = array();
+	$start                     = settings()['start_date'];
+	$received                  = array();
 	for ( $page = 1, $pages = 1; $page <= $pages; ++$page ) {
 		$batch = query_records( 'lcrm_delivery', $filters, $page, 500, '', false );
 		if ( 1 === $page ) {
@@ -718,6 +737,23 @@ function summary( $request ) {
 		}
 		foreach ( $batch['items'] as $d ) {
 			++$out['leads'];
+			$institution = absint( $d['institution'] );
+			if ( $institution && ! isset( $configs[ $institution ] ) ) {
+				$configs[ $institution ] = array(
+					'agreement' => agreement( $institution ),
+					'linked'    => (bool) icount_client( $institution ),
+				);
+			}
+			if ( $institution && ! $configs[ $institution ]['linked'] && 'sent' === $d['state'] && empty( $d['duplicate_of'] ) && empty( $d['billing_excluded'] ) && empty( $d['bill'] ) && valid_date( $start ) && substr( $d['date'], 0, 10 ) >= $start ) {
+				$config = $configs[ $institution ]['agreement'];
+				$rate   = $config ? rate_on( $config, substr( $d['date'], 0, 10 ) ) : null;
+				if ( null === $rate ) {
+					++$out['missing_rate_leads'];
+				} else {
+					$out['unbilled'] += $rate['price'] + intdiv( $rate['price'] * VAT_BP + 5000, 10000 );
+				}
+			}
+
 			// One original submission may have several recipients; contact details do not identify a submission.
 			$source  = $d['source'] ?? null;
 			$contact = $d['contact'] ?? null;
@@ -775,5 +811,6 @@ function summary( $request ) {
 			}
 		}
 	}
+	$out['balance'] = $out['approved'] - $out['paid'] + $out['unbilled'];
 	return $out;
 }

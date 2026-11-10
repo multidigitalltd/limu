@@ -3,7 +3,7 @@
  * Plugin Name: crm
  * Description: crm
  * Update URI: false
- * Version: 0.1.13
+ * Version: 0.1.14
  * Requires at least: 6.6
  * Requires PHP: 7.4.33
  * License: GPL-2.0-or-later
@@ -18,7 +18,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 define( 'LIMU_CRM_FILE', __FILE__ );
-define( 'LIMU_CRM_VERSION', '0.1.13' );
+define( 'LIMU_CRM_VERSION', '0.1.14' );
 require_once __DIR__ . '/includes/assets.php';
 require_once __DIR__ . '/includes/domain.php';
 require_once __DIR__ . '/includes/store.php';
@@ -89,6 +89,7 @@ register_deactivation_hook(
 	__FILE__,
 	function () {
 		wp_clear_scheduled_hook( 'lcrm_daily' );
+		wp_clear_scheduled_hook( 'lcrm_audit_cleanup_batch' );
 		wp_unschedule_hook( 'lcrm_icount_demand' );
 		wp_clear_scheduled_hook( 'lcrm_mapping_repair' );
 		wp_clear_scheduled_hook( 'lcrm_duplicate_index_batch' );
