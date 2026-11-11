@@ -16,7 +16,7 @@ SERVER_SUITES = [
     "integration", "security-review", "auth-security", "native-capture",
     "duplicate-periods", "date-range", "icount", "source-mapping", "mapping-repair",
     "billing-exclusion", "catalog-cache", "duplicate-index", "read-cache", "core-access",
-    "capture-retry", "capture-cases", "bulk-rates",
+    "capture-retry", "capture-cases", "bulk-rates", "lead-debt", "audit-retention",
 ]
 BROWSER_SUITES = ["browser", "frontend-review", "capture-cases-frontend", "settings-cache", "icount-frontend"]
 

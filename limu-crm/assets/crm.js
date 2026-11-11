@@ -5,7 +5,7 @@
   const screen = document.getElementById("screen");
   if (!config || !screen) return;
   const modal = document.getElementById("modal");
-  const emptyFilter = () => ({ month: "", year: "", date_from: "", date_to: "", institution: "", state: "", search: "", billing_status: "" });
+  const emptyFilter = () => ({ month: "", year: "", date_from: "", date_to: "", institution: "", state: "", search: "", billing_status: "", duplicate_status: "" });
   let bootstrap, view = "dashboard", page = 1, items = [], filter = emptyFilter(), lastFocus;
   let generation = 0, modalSession = 0;
   const selectedInstitutions = new Set();
@@ -27,7 +27,8 @@
   const stateName = (s) => ({ sent: "נשלח למוסד", pending: "קליטה לא הושלמה", historical: "היסטורי · לדוחות בלבד", unmapped: "דורש שיוך", draft: "ממתין לאישור", approved: "מאושר" })[s] || s;
   const badge = (text, cls = "") => `<span class="badge ${e(cls)}">${e(text)}</span>`;
   function reportFilters(selected = filter, target = view) {
-    const { billing_status, ...scoped } = selected;
+    const { billing_status, duplicate_status, ...scoped } = selected;
+    if (target === "deliveries" && duplicate_status) scoped.duplicate_status = duplicate_status;
     if (target === "deliveries" && billing_status) scoped.billing_status = billing_status;
     return scoped;
   }
@@ -131,11 +132,16 @@
       <input id="filter-to" name="date_to" type="date" required value="${e(filter.date_to || bootstrap.today)}"></div>
       <div>
       <label for="filter-institution">מוסד</label>
-      <select id="filter-institution" name="institution">${institutionOptions(filter.institution)}</select>
+      ${view === "deliveries" ? `<label for="institution-search">חיפוש מוסד בהקלדה</label><input id="institution-search" type="search" placeholder="הקלדת שם מוסד">` : ""}<select id="filter-institution" name="institution">${institutionOptions(filter.institution)}</select>
       </div>${extra}<button class="button primary" type="submit">${icon("filter")}הצגת נתונים</button>
       <button class="button" type="button" id="reset-filters">${icon("reset")}איפוס</button></form>`;
   }
   function bindFilters() {
+    document.getElementById("institution-search")?.addEventListener("input", (event) => {
+      const select = document.getElementById("filter-institution");
+      const query = event.target.value.trim();
+      select.innerHTML = '<option value="">כל המוסדות</option>' + bootstrap.institutions.filter((i) => i.name.includes(query)).map((i) => `<option value="${e(i.id)}">${e(i.name)}</option>`).join("");
+    });
     const period = document.getElementById("filter-period");
     const syncPeriod = () => {
       for (const [kind, field, id] of [["month", "month-field", "filter-month"], ["year", "year-field", "filter-year"], ["range", "from-field", "filter-from"], ["range", "to-field", "filter-to"]]) {
@@ -169,8 +175,8 @@
       load();
     });
   }
-  function pagination(total, pages) {
-    return `<div class="pagination"><span class="muted">${e(total)} רשומות · עמוד ${page} מתוך ${Math.max(1, pages)}</span>
+  function pagination(total, pages, showTotal = true) {
+    return `<div class="pagination"><span class="muted">${showTotal ? `${e(total)} רשומות · ` : ""}עמוד ${page} מתוך ${Math.max(1, pages)}</span>
       <button class="button" id="prev-page" ${page <= 1 ? "disabled" : ""}>הקודם</button>
       <button class="button" id="next-page" ${page >= pages ? "disabled" : ""}>הבא</button></div>`;
   }
@@ -336,7 +342,7 @@
       <div><strong>${e(missing.length)} מוסדות ללא תעריף פעיל</strong>
       <p>יש להשלים תעריף כדי להכין עבורם חיובים.</p>
       </div>
-      <button class="button" id="missing-rates">השלמת תעריפים</button></section>` : ""}${billingPeriodNote()}<div class="metrics">${metric(metricLabel(bootstrap.manager ? "לידים שהאתר קיבל" : "פניות מקור"), e(received), bootstrap.manager ? "כל פנייה נספרת פעם אחת" : "כל פנייה למוסדות שלך נספרת פעם אחת", "received")}${metric(metricLabel("פניות למוסדות"), e(institutionLeads), `קליטה שוטפת: ${live} · היסטוריה: ${historical} · לכל מוסד בנפרד`, "leads")}${metric(metricLabel("חיובים מאושרים"), money(d.approved), "כולל מע״מ · בתקופה שנבחרה", "bill")}${metric(metricLabel("תשלומים שנרשמו"), money(d.paid), "מתוך חיובי התקופה", "paid")}${metric(metricLabel("יתרה לגבייה"), money(d.approved - d.paid), `${money(d.overdue)} לאחר מועד הפירעון`, "balance", true)}</div>${assignmentNotice}<div class="grid-two dashboard-grid">
+      <button class="button" id="missing-rates">השלמת תעריפים</button></section>` : ""}${billingPeriodNote()}<div class="metrics">${metric(metricLabel(bootstrap.manager ? "לידים שהאתר קיבל" : "פניות מקור"), e(received), bootstrap.manager ? "כל פנייה נספרת פעם אחת" : "כל פנייה למוסדות שלך נספרת פעם אחת", "received")}${metric(metricLabel("פניות למוסדות"), e(institutionLeads), `קליטה שוטפת: ${live} · היסטוריה: ${historical} · לכל מוסד בנפרד`, "leads")}${metric(metricLabel("חיובים מאושרים"), money(d.approved), "כולל מע״מ · בתקופה שנבחרה", "bill")}${metric(metricLabel("תשלומים שנרשמו"), money(d.paid), "מתוך חיובי התקופה", "paid")}${metric(metricLabel("יתרה לגבייה"), money(d.balance ?? (d.approved - d.paid)), d.missing_rate_leads ? `סכום חלקי · ${d.missing_rate_leads} לידים ללא תעריף במועד הפנייה` : `${money(d.overdue)} לאחר מועד הפירעון · כולל לידים זכאים שטרם חויבו`, "balance", true)}</div>${assignmentNotice}<div class="grid-two dashboard-grid">
       <section class="card">
       <div class="section-title">
       <div>
@@ -625,9 +631,7 @@
     if (token !== generation) return;
     items = result.items;
     const extraFilters = `
-      <div>
-  <label for="search">חיפוש לפי שם</label>
-  <input id="search" name="search" value="${e(filter.search)}"></div>
+      <div><label for="filter-duplicates">כפילויות</label><select id="filter-duplicates" name="duplicate_status"><option value="">כל הלידים</option><option value="unique" ${filter.duplicate_status === "unique" ? "selected" : ""}>ללא כפילויות</option><option value="duplicates" ${filter.duplicate_status === "duplicates" ? "selected" : ""}>כפולים בלבד</option></select></div>
       <div>
         <label for="filter-state">מצב פנייה</label>
         <select id="filter-state" name="state">
@@ -647,7 +651,7 @@
       "פניות האתר והיסטוריית הלידים, עם פרטי קשר, כפילות והחרגה מחיוב",
       `<button class="button" id="export">ייצוא Excel</button>
         <button class="button" id="print-leads">הדפסה / שמירה כ־PDF</button>`
-    ) + filters(extraFilters) + (items.length ? deliveryTable(items) : empty("אין פניות להצגה")) + pagination(result.total, result.pages);
+    ) + `<p class="lead-results-count" role="status">סה״כ רשומות שנמצאו: <strong>${e(result.total)}</strong></p>` + filters(extraFilters) + (items.length ? deliveryTable(items) : empty("אין פניות להצגה")) + pagination(result.total, result.pages, false);
     bindFilters();
     bindPages();
     bindDeliveryDetails();
@@ -1168,6 +1172,9 @@
       <form id="settings-form">
       <div class="form-grid">
       <div class="wide">
+      <label for="audit-retention">מחיקת יומן פעילות לאחר מספר ימים</label>
+      <input id="audit-retention" name="audit_retention_days" type="number" min="0" max="36500" step="1" required aria-describedby="audit-retention-help" value="${e(s.audit_retention_days ?? 0)}">
+      <p id="audit-retention-help" class="muted">0 = ללא מחיקה אוטומטית. מספר חיובי מפעיל מחיקה לצמיתות של רשומות יומן ישנות, גם קיימות. הניקוי יומי ותלוי בהפעלת משימות האתר; לידים, חיובים ותשלומים נשמרים.</p>
       <label for="start-date">תאריך תחילת חיובים</label>
       <input id="start-date" name="start_date" type="date" value="${e(s.start_date)}">
       <p class="muted">פניות היסטוריות נשארות לדוחות בלבד.</p>
@@ -1199,7 +1206,7 @@
       </div>`;
     document.getElementById("settings-form").addEventListener("submit", (ev) => {
       ev.preventDefault();
-      submit(ev.target, (data) => api("settings", { start_date: data.start_date, automatic: data.automatic === "on" }));
+      submit(ev.target, (data) => api("settings", { start_date: data.start_date, automatic: data.automatic === "on", audit_retention_days: Number(data.audit_retention_days) }));
     });
     document.getElementById("member-form").addEventListener("submit", (ev) => {
       ev.preventDefault();
@@ -1240,7 +1247,7 @@
       section.id = "print-snapshot";
       section.innerHTML = `<h1>CRM · דוח ${target === "deliveries" ? "לידים" : "חיובים"}</h1>
         <p>${e(period)} · ${e(institution)} · ${e(r.total)} רשומות</p>
-        <p>דוח פנימי — אינו מסמך חשבונאי</p>${selected.billing_status === "excluded" ? "<p>מצב חיוב: החרגה מחיוב</p>" : ""}` + (target === "deliveries" ? deliveryTable(r.items) : billingPeriodNote(selected) + billTable(r.items, false));
+        <p>דוח פנימי — אינו מסמך חשבונאי</p>${selected.duplicate_status ? `<p>כפילויות: ${selected.duplicate_status === "duplicates" ? "כפולים בלבד" : "ללא כפילויות"}</p>` : ""}${selected.billing_status === "excluded" ? "<p>מצב חיוב: החרגה מחיוב</p>" : ""}` + (target === "deliveries" ? deliveryTable(r.items) : billingPeriodNote(selected) + billTable(r.items, false));
       document.body.append(section);
       document.body.classList.add("printing-report");
       window.print();
@@ -1294,7 +1301,7 @@
   async function auditView(token) {
     const r = await api("audit?page=" + page);
     if (token !== generation) return;
-    screen.innerHTML = heading("יומן פעילות", "מי שינה תעריף, אישר חיוב או רשם תשלום — ומתי") + (r.items.length ? `<div class="table-wrap" tabindex="0" role="region" aria-label="טבלת יומן פעילות">
+    screen.innerHTML = heading("יומן פעילות", "מי שינה תעריף, אישר חיוב או רשם תשלום — ומתי. מחיקה אוטומטית לפי מספר הימים שנקבע בהגדרות; 0 שומר ללא הגבלת זמן") + (r.items.length ? `<div class="table-wrap" tabindex="0" role="region" aria-label="טבלת יומן פעילות">
       <table><caption class="sr-only">יומן ביקורת</caption>
       <thead>
       <tr>

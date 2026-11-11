@@ -64,10 +64,11 @@ function error( $message, $status = 400 ) {
  */
 function settings() {
 	$defaults = array(
-		'duplicate_mode' => 'all_time',
-		'duplicate_days' => 30,
-		'automatic'      => false,
-		'start_date'     => '',
+		'duplicate_mode'       => 'all_time',
+		'duplicate_days'       => 30,
+		'automatic'            => false,
+		'start_date'           => '',
+		'audit_retention_days' => 0,
 	);
 	return wp_parse_args(
 		array_intersect_key( (array) get_option( 'lcrm_settings', array() ), $defaults ),
@@ -391,6 +392,23 @@ function audit( $event, $target, $extra = array() ) {
  * @return array Items and totals; raw summary batches after page one return zero totals and pages.
  */
 function query_records( $type, $filters = array(), $page = 1, $limit = 30, $search = '', $hydrate = true ) {
+	$duplicate_ids = null;
+	if ( 'lcrm_delivery' === $type && ! empty( $filters['duplicate_status'] ) ) {
+		$status = $filters['duplicate_status'];
+		unset( $filters['duplicate_status'] );
+		$duplicate_ids = array();
+		for ( $batch_page = 1, $batch_pages = 1; $batch_page <= $batch_pages; ++$batch_page ) {
+			$batch = query_records( $type, $filters, $batch_page, 500, $search, false );
+			if ( 1 === $batch_page ) {
+				$batch_pages = $batch['pages'];
+			}
+			foreach ( $batch['items'] as $item ) {
+				if ( ( 'duplicates' === $status ) === ! empty( $item['duplicate_of'] ) ) {
+					$duplicate_ids[] = $item['id'];
+				}
+			}
+		}
+	}
 	$meta = array( 'relation' => 'AND' );
 	if ( ! manager() ) {
 		$ids = allowed_institutions();
@@ -475,6 +493,7 @@ function query_records( $type, $filters = array(), $page = 1, $limit = 30, $sear
 	$q = new \WP_Query(
 		array(
 			'post_type'              => $type,
+			'post__in'               => null === $duplicate_ids ? array() : ( $duplicate_ids ? $duplicate_ids : array( 0 ) ),
 			'post_status'            => 'private',
 			'posts_per_page'         => min( 5000, max( 1, $limit ) ),
 			'paged'                  => max( 1, $page ),
@@ -1071,3 +1090,51 @@ function rollback_caches() {
 	wp_cache_delete( 'notoptions', 'options' );
 	wp_cache_delete( 'alloptions', 'options' );
 }
+
+/**
+ * Delete at most one batch of expired audit posts under the CRM transaction lock.
+ * Zero days preserves all records; business records are never candidates.
+ *
+ * @return mixed Number deleted or a safe transaction error.
+ */
+function cleanup_audit() {
+	$result = locked(
+		static function () {
+			$days = settings()['audit_retention_days'];
+			if ( ! is_int( $days ) || $days < 1 || $days > 36500 ) {
+				return 0;
+			}
+			$ids = get_posts(
+				array(
+					'post_type'      => 'lcrm_audit',
+					'post_status'    => 'private',
+					'posts_per_page' => 100,
+					'fields'         => 'ids',
+					'orderby'        => 'ID',
+					'order'          => 'ASC',
+					'no_found_rows'  => true,
+					'date_query'     => array(
+						array(
+							'column'    => 'post_date_gmt',
+							'before'    => gmdate( 'Y-m-d H:i:s', time() - $days * DAY_IN_SECONDS ),
+							'inclusive' => false,
+						),
+					),
+				)
+			);
+			foreach ( $ids as $id ) {
+				$GLOBALS['lcrm_changed_records'][] = $id;
+				if ( ! wp_delete_post( $id, true ) ) {
+					return error( 'ניקוי יומן הפעילות נכשל.', 500 );
+				}
+			}
+			return count( $ids );
+		}
+	);
+	if ( 100 === $result && ! wp_next_scheduled( 'lcrm_audit_cleanup_batch' ) ) {
+		wp_schedule_single_event( time() + 60, 'lcrm_audit_cleanup_batch' );
+	}
+	return $result;
+}
+add_action( 'lcrm_daily', __NAMESPACE__ . '\\cleanup_audit' );
+add_action( 'lcrm_audit_cleanup_batch', __NAMESPACE__ . '\\cleanup_audit' );

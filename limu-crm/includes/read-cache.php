@@ -59,6 +59,9 @@ add_action( 'before_delete_post', __NAMESPACE__ . '\\summary_record_changed' );
  * @return void
  */
 function summary_metadata_changed( $meta_id, $object_id, $key ) {
+	if ( in_array( $key, array( '_lcrm_agreement', '_lcrm_icount_client' ), true ) && ! isset( $GLOBALS['lcrm_changed_records'] ) ) {
+		invalidate_summary_cache();
+	}
 	if ( in_array( $key, array( '_lcrm_data', '_lcrm_state', '_lcrm_institution', '_lcrm_month', '_lcrm_date', '_lcrm_source' ), true ) ) {
 		summary_record_changed( $object_id );
 	}
