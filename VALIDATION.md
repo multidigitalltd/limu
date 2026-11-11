@@ -1,3 +1,7 @@
+# גרסה 0.1.15 — סיום תמיכת PHP 7.4
+
+דרישת מינימום PHP 8.3 בכותרת התוסף וב־readme.txt. CI בודק 8.3 ו־8.4, ופרסום החבילה ניזון מה־artifact של 8.3. בקוד runtime לא נמצאו polyfills או תנאים תלויי PHP 7.4. הגנות WordPress, תאימות לממשק ישן, פרטי העסק ותקינות העדכון נשמרו. תוצאות הגרסאות הקודמות בהמשך נשמרות כראיות היסטוריות, ואינן מטריצת התמיכה הנוכחית.
+
 # בדיקות עדכון 0.1.14
 
 השינויים נבדקו מקומית ב־PHP 7.4.33 אמיתי, WordPress מבודד ומסד `limu_test`. עברו אינטגרציה (60), טווח תאריכים (120), אבטחה (128), החרגות (73), תקופות כפילות (88), מטמון (18), התחברות (13), בדיקות חוב וסינון חדשות (12) ושמירת יומן (18). סוויטת הדפדפן הראשית עברה 69 בדיקות, לרבות axe ללידים ולמסכי המערכת. תוצאות הדפדפן הממוקדות מתועדות בלוג ההרצה בסביבת העבודה.
@@ -184,27 +188,27 @@ Lint בשתי גרסאות PHP ו־WPCS נקיים, ו־JS/build עברו ללא
 
 ## הרצה חוזרת בסביבת Codex הנוכחית
 
-הכלים ומסד הדמה נמצאים מחוץ למאגר ב־`/workspace/.limu-tools`. הפעלת `/workspace/.limu-tools/start.sh` מעלה רק את שירותי הבדיקות המקומיים, אם אינם רצים, ומאמתת את מסך ההתחברות. MariaDB מוגבל ל־Unix socket ושרתי PHP ל־loopback בלבד: PHP 8.4 בפורט 8090 ו־PHP 7.4 בפורט 8091. ניתן להחליף php74 ב־php ו־LIMU_TEST_URL ל־8090 להרצה ב־PHP העדכני. הסקריפט אינו עוצר שירותים אחרים.
+הכלים ומסד הדמה נמצאים מחוץ למאגר ב־`/workspace/.limu-tools`. הפעלת `/workspace/.limu-tools/start.sh` מעלה רק את שירותי הבדיקות המקומיים, אם אינם רצים, ומאמתת את מסך ההתחברות. MariaDB מוגבל ל־Unix socket ושרתי PHP ל־loopback בלבד: PHP 8.4 בפורט 8090. הבדיקות הנוכחיות משתמשות ב־8.4 המקומי; PHP 8.3 נבדק במטריצת CI. הסקריפט אינו עוצר שירותים אחרים.
 
 ```sh
 /workspace/.limu-tools/start.sh
 cd /workspace/limu
 npm ci
 npm run build
-LIMU_WP_ROOT=/workspace/.limu-tools/wordpress /workspace/.limu-tools/php74 tests/integration.php
-LIMU_WP_ROOT=/workspace/.limu-tools/wordpress /workspace/.limu-tools/php74 tests/security-review.php
-LIMU_WP_ROOT=/workspace/.limu-tools/wordpress /workspace/.limu-tools/php74 tests/auth-security.php
-LIMU_WP_ROOT=/workspace/.limu-tools/wordpress /workspace/.limu-tools/php74 tests/native-capture.php
-LIMU_WP_ROOT=/workspace/.limu-tools/wordpress /workspace/.limu-tools/php74 tests/duplicate-periods.php
-LIMU_WP_ROOT=/workspace/.limu-tools/wordpress /workspace/.limu-tools/php74 tests/date-range.php
-LIMU_WP_ROOT=/workspace/.limu-tools/wordpress /workspace/.limu-tools/php74 tests/icount.php
-LIMU_PHP=/workspace/.limu-tools/php74 LIMU_WP_ROOT=/workspace/.limu-tools/wordpress python3 tests/concurrency.py
-/workspace/.limu-tools/php74 /workspace/.limu-tools/member-login.php
-LIMU_TEST_URL=http://127.0.0.1:8091 LIMU_TEST_LOGIN=/workspace/.limu-tools/test-login.json LIMU_MEMBER_LOGIN=/workspace/.limu-tools/member-login.json LIMU_AXE_PATH=/workspace/limu/node_modules/axe-core/axe.min.js LIMU_SCREENSHOT_DIR=/workspace/limu/artifacts node tests/browser.cjs
-LIMU_TEST_URL=http://127.0.0.1:8091 LIMU_TEST_LOGIN=/workspace/.limu-tools/test-login.json node tests/frontend-review.cjs
-LIMU_TEST_URL=http://127.0.0.1:8091 LIMU_TEST_LOGIN=/workspace/.limu-tools/test-login.json node tests/settings-cache.cjs
-LIMU_TEST_URL=http://127.0.0.1:8091 LIMU_TEST_LOGIN=/workspace/.limu-tools/test-login.json LIMU_MEMBER_LOGIN=/workspace/.limu-tools/member-login.json node tests/icount-frontend.cjs
-/workspace/.limu-tools/php74 /workspace/.limu-tools/phpcs/bin/phpcs --standard=phpcs.xml
+LIMU_WP_ROOT=/workspace/.limu-tools/wordpress /workspace/.limu-tools/php tests/integration.php
+LIMU_WP_ROOT=/workspace/.limu-tools/wordpress /workspace/.limu-tools/php tests/security-review.php
+LIMU_WP_ROOT=/workspace/.limu-tools/wordpress /workspace/.limu-tools/php tests/auth-security.php
+LIMU_WP_ROOT=/workspace/.limu-tools/wordpress /workspace/.limu-tools/php tests/native-capture.php
+LIMU_WP_ROOT=/workspace/.limu-tools/wordpress /workspace/.limu-tools/php tests/duplicate-periods.php
+LIMU_WP_ROOT=/workspace/.limu-tools/wordpress /workspace/.limu-tools/php tests/date-range.php
+LIMU_WP_ROOT=/workspace/.limu-tools/wordpress /workspace/.limu-tools/php tests/icount.php
+LIMU_PHP=/workspace/.limu-tools/php LIMU_WP_ROOT=/workspace/.limu-tools/wordpress python3 tests/concurrency.py
+/workspace/.limu-tools/php /workspace/.limu-tools/member-login.php
+LIMU_TEST_URL=http://127.0.0.1:8090 LIMU_TEST_LOGIN=/workspace/.limu-tools/test-login.json LIMU_MEMBER_LOGIN=/workspace/.limu-tools/member-login.json LIMU_AXE_PATH=/workspace/limu/node_modules/axe-core/axe.min.js LIMU_SCREENSHOT_DIR=/workspace/limu/artifacts node tests/browser.cjs
+LIMU_TEST_URL=http://127.0.0.1:8090 LIMU_TEST_LOGIN=/workspace/.limu-tools/test-login.json node tests/frontend-review.cjs
+LIMU_TEST_URL=http://127.0.0.1:8090 LIMU_TEST_LOGIN=/workspace/.limu-tools/test-login.json node tests/settings-cache.cjs
+LIMU_TEST_URL=http://127.0.0.1:8090 LIMU_TEST_LOGIN=/workspace/.limu-tools/test-login.json LIMU_MEMBER_LOGIN=/workspace/.limu-tools/member-login.json node tests/icount-frontend.cjs
+/workspace/.limu-tools/php /workspace/.limu-tools/phpcs/bin/phpcs --standard=phpcs.xml
 ```
 
 בדיקות שמשנות את מסד הנתונים רצות ברצף. גם בדיקות הדפדפן רצות ברצף בין גרסאות PHP: ההתחברות יוצרת WordPress session tokens באותה רשומת משתמש, ולכן הרצות מקבילות באותו חשבון עלולות לדרוס התחברות של הרצה אחרת.

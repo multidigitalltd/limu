@@ -1,8 +1,8 @@
 === crm ===
 Contributors: multidigital
 Requires at least: 6.6
-Requires PHP: 7.4.33
-Stable tag: 0.1.14
+Requires PHP: 8.3
+Stable tag: 0.1.15
 License: GPLv2 or later
 
 crm

@@ -82,7 +82,7 @@ def specification(version, target, directory, names, legacy):
         if version == "0.1.8":
             notes += "\nמצורפים גם ZIP התיעוד המקורי ו־`limu-crm-evidence-through-0.1.8.zip`: בדיוק 140 קובצי ראיות מהקומיט המקורי, בנתיבי `artifacts/` ההיסטוריים. הלוגים, המדידות המצרפיות וצילומי נתוני הדמה אינם כוללים מסד פונים או אישורי גישה.\n"
     else:
-        notes = f"חבילת CRM {version}, מהקומיט `{target}`.\n\nהחבילה עברה את בדיקות CI על PHP 7.4.33 ועל PHP 8.4 ונבדקה מחדש מול קובצי ההפעלה של אותו קומיט. חתימת SHA-256 מצורפת ב־`SHA256SUMS`. חיבור iCount נבדק עם ספק מדומה בלבד.\n\n[תיאור השינויים וההתקנה](https://github.com/{PROJECT}/blob/{target}/README.md)\n"
+        notes = f"חבילת CRM {version}, מהקומיט `{target}`.\n\nהחבילה עברה את בדיקות CI על PHP 8.3 ועל PHP 8.4 ונבדקה מחדש מול קובצי ההפעלה של אותו קומיט. חתימת SHA-256 מצורפת ב־`SHA256SUMS`. חיבור iCount נבדק עם ספק מדומה בלבד.\n\n[תיאור השינויים וההתקנה](https://github.com/{PROJECT}/blob/{target}/README.md)\n"
     notes += "\n" + marker + "\n"
     (directory / "notes.md").write_text(notes)
     return {"version": version, "tag": "crm-v" + version, "target_commit": target, "legacy": legacy, "directory": str(directory), "marker": marker, "title": f"crm {version}" + (" (legacy archive)" if legacy else ""), "assets": assets, "verified": False}
