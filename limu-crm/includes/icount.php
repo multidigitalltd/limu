@@ -281,6 +281,9 @@ function icount_documents( $target ) {
 	if ( ! in_array( $type, array( 'lcrm_bill', 'lcrm_payment' ), true ) || empty( $row['institution'] ) || ! owns( $row['institution'] ) ) {
 		return array();
 	}
+	if ( ! manager() && ! empty( $row['billing_group'] ) && array_diff( $row['billing_members'], allowed_institutions() ) ) {
+		return array();
+	}
 	$bill = 'lcrm_payment' === $type ? (int) $row['bill'] : $target;
 	$out  = array();
 	foreach ( icount_outbox( $bill ) as $operation ) {
@@ -370,7 +373,8 @@ function icount_reserve( $bill_id, $kind, $payment_id = 0, $details = array() ) 
 			if ( 'lcrm_bill' !== get_post_type( $bill_id ) ) {
 				return error( 'להפקה דרושים חיוב מאושר, חיבור מאומת וקישור המוסד ללקוח iCount.', 409 );
 			}
-			$bill   = raw_records( array( $bill_id ) )[0];
+			$bill = raw_records( array( $bill_id ) )[0];
+			billing_validate_bill( $bill );
 			$status = icount_status();
 			$client = icount_client( $bill['institution'] ?? 0 );
 			if ( 'lcrm_bill' !== get_post_type( $bill_id ) || 'approved' !== ( $bill['state'] ?? '' ) || ! $status['verified'] || ! $client ) {
@@ -455,7 +459,7 @@ function icount_reserve( $bill_id, $kind, $payment_id = 0, $details = array() ) 
 					$subtotal += $line['price'];
 					$vat      += $line['vat'];
 					$items[]   = array(
-						'description' => 'ליד לחודש ' . $bill['month'],
+						'description' => ( isset( $line['institution_name'] ) ? $line['institution_name'] . ' — ' : '' ) . 'ליד לחודש ' . $bill['month'],
 						'unitprice'   => icount_decimal( $line['price'] ),
 						'quantity'    => 1,
 					);

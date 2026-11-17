@@ -52,8 +52,8 @@ function icount_api( $request ) {
 		'client'         => array( 'institution', 'client_id' ),
 		'client-preview' => array( 'client_id' ),
 		'bill'           => array( 'bill' ),
-		'issue'          => array( 'bill', 'doctype' ),
-		'payment'        => array( 'payment', 'account', 'bank', 'branch', 'number', 'check_date' ),
+		'issue'          => array( 'bill', 'doctype', 'shared_billing' ),
+		'payment'        => array( 'payment', 'account', 'bank', 'branch', 'number', 'check_date', 'shared_billing' ),
 		'reconcile'      => array( 'target', 'doctype', 'docnum' ),
 		'automatic'      => array( 'enabled' ),
 	);
@@ -90,11 +90,23 @@ function icount_api( $request ) {
 		);
 	}
 	if ( 'issue' === $action ) {
+		$ack = billing_acknowledgement( absint( $input['bill'] ?? 0 ), $input );
+		if ( is_wp_error( $ack ) ) {
+			return $ack;
+		}
 		return icount_issue_bill( absint( $input['bill'] ?? 0 ), $input['doctype'] ?? '' );
 	}
 	if ( 'payment' === $action ) {
 		$id = absint( $input['payment'] ?? 0 );
-		unset( $input['payment'] );
+		if ( 'lcrm_payment' !== get_post_type( $id ) ) {
+			return error( 'תשלום לא נמצא.', 404 );
+		}
+		$payment = raw_records( array( $id ) )[0];
+		$ack     = billing_acknowledgement( (int) $payment['bill'], $input );
+		if ( is_wp_error( $ack ) ) {
+			return $ack;
+		}
+		unset( $input['payment'], $input['shared_billing'] );
 		return icount_issue_payment( $id, $input );
 	}
 	if ( 'reconcile' === $action ) {

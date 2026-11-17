@@ -69,6 +69,10 @@ if ( ! defined( 'ABSPATH' ) ) {
 			'label' => 'מוסדות ותעריפים',
 			'path'  => 'M3 21h18 M5 21V7l7-4 7 4v14 M9 21v-5h6v5 M9 8h1 M14 8h1 M9 12h1 M14 12h1',
 		);
+		$nav_items['groups']       = array(
+			'label' => 'קבוצות גבייה',
+			'path'  => 'M3 6h18 M3 12h18 M3 18h18',
+		);
 		$nav_items['settings']     = array(
 			'label' => 'הגדרות והרשאות',
 			'path'  => 'M4 7h16 M4 17h16 M8 4v6 M16 14v6',
@@ -84,7 +88,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	<a class="brand" href="<?php echo esc_url( home_url( '/crm/' ) ); ?>"><img class="brand-logo" src="<?php echo esc_url( plugins_url( 'assets/brand/logo.226feadc9690.png', LIMU_CRM_FILE ) ); ?>" width="768" height="261" alt="לימודים לחרדים" decoding="async"></a>
 	<p class="sidebar-caption">CRM · ניהול מוסדות ולידים</p>
 	<nav id="navigation" aria-label="מסכי המערכת">
-		<?php foreach ( array( 'dashboard', 'deliveries', 'capture', 'institutions', 'bills', 'reports', 'settings', 'audit' ) as $nav_key ) : ?>
+		<?php foreach ( array( 'dashboard', 'deliveries', 'capture', 'institutions', 'bills', 'groups', 'reports', 'settings', 'audit' ) as $nav_key ) : ?>
 			<?php
 			if ( ! isset( $nav_items[ $nav_key ] ) ) {
 				continue;

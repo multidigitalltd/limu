@@ -16,9 +16,9 @@ SERVER_SUITES = [
     "integration", "security-review", "auth-security", "native-capture",
     "duplicate-periods", "date-range", "icount", "source-mapping", "mapping-repair",
     "billing-exclusion", "catalog-cache", "duplicate-index", "read-cache", "core-access",
-    "capture-retry", "capture-cases", "bulk-rates", "lead-debt", "audit-retention",
+    "capture-retry", "capture-cases", "bulk-rates", "lead-debt", "audit-retention", "billing-groups",
 ]
-BROWSER_SUITES = ["browser", "frontend-review", "capture-cases-frontend", "settings-cache", "icount-frontend"]
+BROWSER_SUITES = ["browser", "frontend-review", "capture-cases-frontend", "settings-cache", "icount-frontend", "billing-groups-frontend"]
 
 
 def run_suite(name, command, environment, output):

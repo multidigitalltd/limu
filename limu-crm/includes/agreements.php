@@ -90,7 +90,7 @@ function agreement_approved_month( $id ) {
 		return '';
 	}
 	$bill = raw_records( $rows )[0];
-	if ( ! isset( $bill['institution'], $bill['state'], $bill['month'] ) || (int) $bill['institution'] !== $id || 'approved' !== $bill['state'] || ! valid_date( $bill['month'] . '-01' ) ) {
+	if ( ! isset( $bill['institution'], $bill['state'], $bill['month'] ) || ! in_array( (int) $id, billing_members( $bill ), true ) || 'approved' !== $bill['state'] || ! valid_date( $bill['month'] . '-01' ) ) {
 		return error( 'לא ניתן לבדוק תקופות חיוב מאושרות.', 500 );
 	}
 	return $bill['month'];

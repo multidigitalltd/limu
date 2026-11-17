@@ -125,7 +125,7 @@ function public_item( $item ) {
 		$item['billing_excluded'] = ! empty( $item['billing_excluded'] );
 	}
 	if ( isset( $item['id'] ) && in_array( get_post_type( $item['id'] ), array( 'lcrm_bill', 'lcrm_payment' ), true ) ) {
-		$item['documents'] = icount_documents( $item['id'] );
+		$item['documents'] = ! empty( $item['scoped_group'] ) ? array() : icount_documents( $item['id'] );
 		if ( ! manager() ) {
 			$item['documents'] = array_values( array_filter( $item['documents'], static fn( $document ) => 'issued' === $document['state'] ) );
 			foreach ( $item['documents'] as &$document ) {
@@ -137,7 +137,7 @@ function public_item( $item ) {
 	unset( $item['phone_key'], $item['email_key'], $item['request_key'] );
 	if ( ! manager() ) {
 		$item['count'] = isset( $item['lines'] ) ? count( $item['lines'] ) : 0;
-		unset( $item['source'], $item['actor'], $item['approved_by'], $item['lines'], $item['notes'], $item['evidence'], $item['confirmed_by'], $item['contact'], $item['legacy_id'], $item['origin_live'], $item['capture_via'], $item['capture_error'], $item['billing_excluded_by'], $item['billing_excluded_at'] );
+		unset( $item['billing_group'], $item['billing_members'], $item['shares'], $item['allocations'], $item['source'], $item['actor'], $item['approved_by'], $item['lines'], $item['notes'], $item['evidence'], $item['confirmed_by'], $item['contact'], $item['legacy_id'], $item['origin_live'], $item['capture_via'], $item['capture_error'], $item['billing_excluded_by'], $item['billing_excluded_at'] );
 		foreach ( array_keys( $item ) as $key ) {
 			if ( 0 === strpos( $key, 'capture_' ) ) {
 				unset( $item[ $key ] );
@@ -516,8 +516,9 @@ function write_api( $request ) {
 		foreach ( $ids as $id ) {
 			$was_approved = 'lcrm_bill' === get_post_type( $id ) && 'approved' === ( raw_records( array( $id ) )[0]['state'] ?? '' );
 			$r            = attempt(
-				function () use ( $id ) {
-					return approve_bill( $id );
+				function () use ( $id, $input ) {
+					$ack = billing_acknowledgement( $id, $input );
+					return is_wp_error( $ack ) ? $ack : approve_bill( $id );
 				}
 			);
 			if ( ! is_wp_error( $r ) && ! $was_approved ) {
@@ -534,6 +535,10 @@ function write_api( $request ) {
 		);
 	}
 	if ( 'payment' === $route ) {
+		$ack = billing_acknowledgement( absint( $input['bill'] ?? 0 ), $input );
+		if ( is_wp_error( $ack ) ) {
+			return $ack;
+		}
 		return record_payment( absint( $input['bill'] ?? 0 ), $input );
 	}
 	if ( 'billing-exclusion' === $route ) {
@@ -646,8 +651,8 @@ function export_xlsx( $target, $result ) {
 	$institutions = array_column( institution_list(), 'name', 'id' );
 	$rows         = array( $headers );
 	foreach ( $result['items'] as $item ) {
-		$name   = $institutions[ $item['institution'] ] ?? '';
-		$rows[] = 'deliveries' === $target ? array( $name, $item['date'], $item['name'], $item['phone'], $item['email'], $item['form'] ?? '', $item['duplicate_of'] ? 'כפול — לא לחיוב' : 'ללא כפילות', $item['state'], ! empty( $item['billing_excluded'] ) ? 'החרגה מחיוב' : 'ללא החרגה ידנית' ) : array( $name, $item['month'], $item['state'], $item['subtotal'] / 100, $item['vat'] / 100, $item['total'] / 100, $item['paid'] / 100, ( $item['total'] - $item['paid'] ) / 100, $item['due'] );
+		$name   = $item['group_name'] ?? ( $institutions[ $item['institution'] ] ?? '' );
+		$rows[] = 'deliveries' === $target ? array( $name, $item['date'], $item['name'] ?? '', $item['phone'] ?? '', $item['email'] ?? '', $item['form'] ?? '', $item['duplicate_of'] ? 'כפול — לא לחיוב' : 'ללא כפילות', $item['state'], ! empty( $item['billing_excluded'] ) ? 'החרגה מחיוב' : 'ללא החרגה ידנית' ) : array( $name, $item['month'], $item['state'], $item['subtotal'] / 100, $item['vat'] / 100, $item['total'] / 100, $item['paid'] / 100, ( $item['total'] - $item['paid'] ) / 100, $item['due'] );
 	}
 	$xml = '<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0" rightToLeft="1"/></sheetViews><sheetData>';
 	foreach ( $rows as $i => $row ) {
@@ -728,8 +733,14 @@ function summary( $request ) {
 	$out['unbilled']           = 0;
 	$out['missing_rate_leads'] = 0;
 	$configs                   = array();
-	$start                     = settings()['start_date'];
-	$received                  = array();
+	$group_payers              = array();
+	$client_links              = array();
+	$billing_groups            = billing_groups();
+	if ( is_wp_error( $billing_groups ) ) {
+		return $billing_groups;
+	}
+	$start    = settings()['start_date'];
+	$received = array();
 	for ( $page = 1, $pages = 1; $page <= $pages; ++$page ) {
 		$batch = query_records( 'lcrm_delivery', $filters, $page, 500, '', false );
 		if ( 1 === $page ) {
@@ -738,13 +749,24 @@ function summary( $request ) {
 		foreach ( $batch['items'] as $d ) {
 			++$out['leads'];
 			$institution = absint( $d['institution'] );
+			$group_key   = $institution . ':' . $d['month'];
+			if ( ! isset( $group_payers[ $group_key ] ) ) {
+				$billing_group = billing_group_for( $institution, $d['month'], $billing_groups );
+				if ( is_wp_error( $billing_group ) ) {
+					return $billing_group;
+				}
+				$group_payers[ $group_key ] = $billing_group ? $billing_group['payer'] : $institution;
+			}
+			$payer = $group_payers[ $group_key ];
+			if ( ! array_key_exists( $payer, $client_links ) ) {
+				$client_links[ $payer ] = (bool) icount_client( $payer );
+			}
 			if ( $institution && ! isset( $configs[ $institution ] ) ) {
 				$configs[ $institution ] = array(
 					'agreement' => agreement( $institution ),
-					'linked'    => (bool) icount_client( $institution ),
 				);
 			}
-			if ( $institution && ! $configs[ $institution ]['linked'] && 'sent' === $d['state'] && empty( $d['duplicate_of'] ) && empty( $d['billing_excluded'] ) && empty( $d['bill'] ) && valid_date( $start ) && substr( $d['date'], 0, 10 ) >= $start ) {
+			if ( $institution && ! $client_links[ $payer ] && 'sent' === $d['state'] && empty( $d['duplicate_of'] ) && empty( $d['billing_excluded'] ) && empty( $d['bill'] ) && valid_date( $start ) && substr( $d['date'], 0, 10 ) >= $start ) {
 				$config = $configs[ $institution ]['agreement'];
 				$rate   = $config ? rate_on( $config, substr( $d['date'], 0, 10 ) ) : null;
 				if ( null === $rate ) {
