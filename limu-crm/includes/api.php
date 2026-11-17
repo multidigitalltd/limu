@@ -136,6 +136,9 @@ function public_item( $item ) {
 	}
 	unset( $item['phone_key'], $item['email_key'], $item['request_key'] );
 	if ( ! manager() ) {
+		if ( ! empty( $item['scoped_group'] ) ) {
+			unset( $item['reference'] );
+		}
 		$item['count'] = isset( $item['lines'] ) ? count( $item['lines'] ) : 0;
 		unset( $item['billing_group'], $item['billing_members'], $item['shares'], $item['allocations'], $item['source'], $item['actor'], $item['approved_by'], $item['lines'], $item['notes'], $item['evidence'], $item['confirmed_by'], $item['contact'], $item['legacy_id'], $item['origin_live'], $item['capture_via'], $item['capture_error'], $item['billing_excluded_by'], $item['billing_excluded_at'] );
 		foreach ( array_keys( $item ) as $key ) {

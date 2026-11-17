@@ -65,7 +65,7 @@ const assert=require('node:assert/strict');
  await page.locator('[data-fiscal-issue=invoice]').click();await page.locator('#fiscal-issue-form button[type=submit]').click();await ready();check(issuePayload.bill===100&&issuePayload.shared_billing===true,'Invoice UI explicitly acknowledges a whole shared bill');
  await page.locator('#filter-institution').selectOption('2');await page.getByRole('button',{name:'הצגת נתונים',exact:true}).click();await ready();await page.locator('[data-payment="100"]').click();await page.locator('#payment-form').waitFor();
  check(await page.locator('#amount').inputValue()==='25.39'&&(await page.locator('#modal-content').textContent()).includes('התשלום נרשם עבור הקבוצה כולה'),'Payment from an institution-filtered report loads and labels the whole group balance');
- await page.locator('#amount').fill('10.01');await page.locator('#payment-form button[type=submit]').click();await page.locator('#payment-form').waitFor({state:'detached'});await ready();
+ await page.locator('#amount').fill('10.01');await page.locator('#payment-form button[type=submit]').click();await page.locator('#payment-form').waitFor({state:'hidden'});await ready();
  check(paymentPayload.bill===100&&paymentPayload.amount==='10.01'&&paymentPayload.request_key&&paymentPayload.shared_billing===true&&!('allocations' in paymentPayload),'Payment UI sends one group payment; allocation is authoritative on server');
  mode='draft';await page.locator('#filter-institution').selectOption('2');await page.getByRole('button',{name:'הצגת נתונים',exact:true}).click();await ready();
  await page.getByText('לאישור הקבוצה יש לבחור כל המוסדות במסנן.',{exact:true}).waitFor();

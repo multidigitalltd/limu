@@ -144,7 +144,7 @@ try {
  $user=wp_create_user('group-member-'.wp_generate_password(8,false),'fixture-'.wp_generate_password(20));$bg_users[]=$user;$u=new WP_User($user);$u->set_role('subscriber');$u->add_cap('lcrm_view');update_user_meta($user,'_lcrm_institutions',array($b));wp_set_current_user($user);
  bg_check(bg_request()->get_status()===403&&bg_request($input)->get_status()===403,'Institution cannot read or mutate billing-group settings');
  $member=bg_read('bills')->get_data()['items'][0];bg_check($member['total']===2360&&$member['paid']===2360&&$member['institution']===$b&&!isset($member['shares'],$member['billing_members'],$member['lines']),'Institution sees only its share with internal membership/lines removed');
- $payments=bg_read('payments')->get_data()['items'];bg_check(array_sum(array_column($payments,'amount'))===2360&&!isset($payments[0]['allocations']),'Institution payment report exposes only its allocated money');
+ $payments=bg_read('payments')->get_data()['items'];bg_check(array_sum(array_column($payments,'amount'))===2360&&!isset($payments[0]['allocations'])&&!isset($payments[0]['reference']),'Institution payment report exposes only its allocated money');
  $summary=bg_read('summary')->get_data();bg_check($summary['approved']===2360&&$summary['paid']===2360,'Member dashboard does not count group totals or payment twice');
  bg_check(bg_read('bills',array('institution'=>$a))->get_status()===403,'Member cannot request another institution share');
  update_user_meta($user,'_lcrm_institutions',array($a));
