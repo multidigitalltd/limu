@@ -301,6 +301,9 @@ function raw_records( $ids ) {
  * @return mixed Operation result or validation error.
  */
 function save_record( $type, $payload, $id = 0 ) {
+	if ( ! empty( $payload['billing_group'] ) && ! isset( $GLOBALS['lcrm_changed_records'] ) ) {
+		return error( 'רשומת גבייה משותפת מחייבת שמירה מאובטחת.', 500 );
+	}
 	if ( 'lcrm_bill' === $type ) {
 		billing_validate_bill( $payload );
 	}
@@ -853,10 +856,6 @@ function prepare_bill( $id, $month ) {
 	$config = agreement( $id );
 	if ( ! $config || ! valid_date( $s['start_date'] ) ) {
 		return error( 'יש להגדיר הסכם ותאריך תחילת חיוב.' );
-	}
-	$existing = bill_for( $id, $month );
-	if ( $existing && 'approved' === $existing['state'] ) {
-		return $existing;
 	}
 	$first = $month . '-01 00:00:00';
 	$end   = ( new \DateTimeImmutable( $first, wp_timezone() ) )->modify( 'last day of this month' )->format( 'Y-m-d' ) . ' 23:59:59';

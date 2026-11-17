@@ -61,6 +61,7 @@ try {
  $draft=bg_ok(LimuCRM\locked(fn()=>LimuCRM\prepare_bill($a,$month)));
  bg_check(count($draft['lines'])===2&&$draft['total']===3540,'One draft bills the same source separately at each institution tariff');
  bg_check($draft['duplicates']===1&&$draft['historical']===1,'Duplicates, exclusions and report-only history never add debt');
+ $batch=bg_post('prepare',array('institutions'=>array($a,$b),'month'=>$month))->get_data();bg_check(count($batch['results'])===1&&$batch['results'][0]['id']===$draft['id'],'Batch preparation resolves both members to one group result');
  $again=bg_ok(LimuCRM\locked(fn()=>LimuCRM\prepare_bill($b,$month)));bg_check($again['id']===$draft['id'],'Preparing the second member returns the same bill');
  bg_check(LimuCRM\query_records('lcrm_bill',array('billing_group'=>$id),1,30)['total']===1,'Group appears once despite multiple membership index rows');
  $scoped=LimuCRM\query_records('lcrm_bill',array('institution'=>$b),1,30)['items'][0];bg_check($scoped['total']===2360&&count($scoped['lines'])===1&&$scoped['scoped_group'],'Institution-filtered report uses only that institution share');
@@ -104,6 +105,7 @@ try {
  $wrong=$payment;$wrong['amount']='10.02';bg_check(is_wp_error(LimuCRM\locked(fn()=>LimuCRM\record_payment($bill['id'],$wrong))),'Conflicting replay is rejected');
  $rest=$payment;$rest['request_key']=wp_generate_uuid4();$rest['amount']='25.40';bg_check(is_wp_error(LimuCRM\locked(fn()=>LimuCRM\record_payment($bill['id'],$rest))),'Overpayment rejected for whole group');
  $rest['amount']='25.39';bg_ok(LimuCRM\locked(fn()=>LimuCRM\record_payment($bill['id'],$rest)));
+ bg_check(is_wp_error(LimuCRM\save_record('lcrm_bill',LimuCRM\data($bill['id']),$bill['id'])),'Shared snapshots cannot be written without the transaction guard');
  $paid=LimuCRM\data($bill['id']);bg_check($paid['paid']===3540&&$paid['shares'][$a]['paid']===1180&&$paid['shares'][$b]['paid']===2360,'Final payment reconciles all institution balances exactly');
  bg_check(bg_request(array('id'=>$id,'cancelled'=>true))->get_status()===409,'A billed group cannot be cancelled or erased');
  bg_check(bg_request(array('id'=>$id,'until'=>current_time('Y-m')))->get_status()===200,'Group can end prospectively while preserving bills');

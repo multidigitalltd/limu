@@ -316,16 +316,49 @@ function billing_validate_bill( $bill ) {
  * @param array  $group Effective group.
  * @param string $month Completed month.
  * @return array|\WP_Error Shared draft.
+ * @throws \RuntimeException When the authoritative billing period cannot be read.
  */
 function prepare_group_bill( $group, $month ) {
-	$existing = null;
-	foreach ( $group['members'] as $member ) {
-		$found = bill_for( $member, $month );
-		if ( $found ) {
-			if ( ( $found['billing_group'] ?? '' ) !== $group['id'] || ( $found['billing_members'] ?? array() ) !== $group['members'] || ( $existing && $existing['id'] !== $found['id'] ) ) {
-				return error( 'קיים חיוב נפרד או חיוב מקבוצה אחרת בתקופה. החיוב הקיים לא ישונה.', 409 );
-			}
-			$existing = $found;
+	global $wpdb;
+	if ( ! isset( $GLOBALS['lcrm_changed_records'] ) || ! billing_month_valid( $month ) || $month >= current_time( 'Y-m' ) ) {
+		return error( 'חיוב משותף מחייב שמירה מאובטחת וחודש שהסתיים.' );
+	}
+	$queries = $wpdb->num_queries;
+	$ids     = get_posts(
+		array(
+			'post_type'              => 'lcrm_bill',
+			'post_status'            => 'private',
+			'fields'                 => 'ids',
+			'posts_per_page'         => 2,
+			'cache_results'          => false,
+			'no_found_rows'          => true,
+			'update_post_meta_cache' => false,
+			'update_post_term_cache' => false,
+			'meta_query'             => array(
+				array(
+					'key'     => '_lcrm_institution',
+					'value'   => $group['members'],
+					'compare' => 'IN',
+					'type'    => 'NUMERIC',
+				),
+				array(
+					'key'   => '_lcrm_month',
+					'value' => $month,
+				),
+			),
+		)
+	);
+	if ( $wpdb->num_queries <= $queries || $wpdb->last_error ) {
+		throw new \RuntimeException( 'Shared billing period lookup failed.' );
+	}
+	if ( count( $ids ) > 1 ) {
+		return error( 'קיימים חיובים נפרדים או חופפים בתקופה. החיובים הקיימים לא ישונו.', 409 );
+	}
+	$existing = $ids ? raw_records( $ids )[0] : null;
+	if ( $existing ) {
+		billing_validate_bill( $existing );
+		if ( ( $existing['billing_group'] ?? '' ) !== $group['id'] || ( $existing['billing_members'] ?? array() ) !== $group['members'] ) {
+			return error( 'קיים חיוב נפרד או חיוב מקבוצה אחרת בתקופה. החיוב הקיים לא ישונה.', 409 );
 		}
 	}
 	if ( $existing && 'approved' === $existing['state'] ) {

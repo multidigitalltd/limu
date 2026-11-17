@@ -486,8 +486,22 @@ function write_api( $request ) {
 		if ( ! $ids ) {
 			return error( 'יש לבחור מוסדות.' );
 		}
+		$registry = billing_groups();
+		if ( is_wp_error( $registry ) ) {
+			return $registry;
+		}
+		$seen    = array();
 		$results = array();
 		foreach ( $ids as $id ) {
+			$group = billing_group_for( $id, $month, $registry );
+			if ( is_wp_error( $group ) ) {
+				return $group;
+			}
+			$key = $group ? 'group:' . $group['id'] : 'institution:' . $id;
+			if ( isset( $seen[ $key ] ) ) {
+				continue;
+			}
+			$seen[ $key ] = true;
 			if ( 'institutions' !== get_post_type( $id ) ) {
 				$results[] = array(
 					'id'    => $id,

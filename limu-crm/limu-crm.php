@@ -211,7 +211,7 @@ add_action(
 		$month  = $today->modify( 'first day of last month' )->format( 'Y-m' );
 		$result = locked(
 			function () use ( $month ) {
-				$institutions   = get_posts(
+				$institutions = get_posts(
 					array(
 						'post_type'      => 'institutions',
 						'post_status'    => array( 'publish', 'draft' ),
@@ -220,8 +220,22 @@ add_action(
 						'no_found_rows'  => true,
 					)
 				);
+				$registry     = billing_groups();
+				if ( is_wp_error( $registry ) ) {
+					return $registry;
+				}
+				$seen           = array();
 				$newly_approved = array();
 				foreach ( $institutions as $id ) {
+					$group = billing_group_for( $id, $month, $registry );
+					if ( is_wp_error( $group ) ) {
+						return $group;
+					}
+					$key = $group ? 'group:' . $group['id'] : 'institution:' . $id;
+					if ( isset( $seen[ $key ] ) ) {
+						continue;
+					}
+					$seen[ $key ] = true;
 					if ( ! agreement( $id ) ) {
 						continue;
 					}
