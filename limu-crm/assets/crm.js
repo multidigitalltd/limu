@@ -132,16 +132,107 @@
       <input id="filter-to" name="date_to" type="date" required value="${e(filter.date_to || bootstrap.today)}"></div>
       <div>
       <label for="filter-institution">מוסד</label>
-      ${view === "deliveries" ? `<label for="institution-search">חיפוש מוסד בהקלדה</label><input id="institution-search" type="search" placeholder="הקלדת שם מוסד">` : ""}<select id="filter-institution" name="institution">${institutionOptions(filter.institution)}</select>
+      ${view === "deliveries" ? `<div class="institution-picker" id="institution-picker">
+        <input type="hidden" name="institution" value="${e(filter.institution)}">
+        <div class="institution-picker-control">
+          <input id="filter-institution" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="institution-options" aria-describedby="institution-picker-help" autocomplete="off" placeholder="כל המוסדות — הקלדה לחיפוש" value="${e(filter.institution ? name(filter.institution) : "")}">
+          <button type="button" class="institution-picker-clear" aria-label="ניקוי בחירת מוסד" ${filter.institution ? "" : "hidden"}>×</button>
+        </div>
+        <span id="institution-picker-help" class="sr-only">הקלידו לחיפוש מוסד. חצים למעבר בין התוצאות, Enter לבחירה, Escape לביטול. שדה ריק מציג את כל המוסדות.</span>
+        <div class="institution-picker-menu" hidden>
+          <div id="institution-options" role="listbox" aria-label="מוסדות"></div>
+          <p class="institution-picker-empty" hidden>לא נמצאו מוסדות</p>
+        </div>
+        <span class="sr-only" role="status" aria-live="polite" id="institution-picker-status"></span>
+      </div>` : `<select id="filter-institution" name="institution">${institutionOptions(filter.institution)}</select>`}
       </div>${extra}<button class="button primary" type="submit">${icon("filter")}הצגת נתונים</button>
       <button class="button" type="button" id="reset-filters">${icon("reset")}איפוס</button></form>`;
   }
-  function bindFilters() {
-    document.getElementById("institution-search")?.addEventListener("input", (event) => {
-      const select = document.getElementById("filter-institution");
-      const query = event.target.value.trim();
-      select.innerHTML = '<option value="">כל המוסדות</option>' + bootstrap.institutions.filter((i) => i.name.includes(query)).map((i) => `<option value="${e(i.id)}">${e(i.name)}</option>`).join("");
+  function bindInstitutionPicker() {
+    const root = document.getElementById("institution-picker");
+    if (!root) return;
+    const input = root.querySelector('[role="combobox"]'), hidden = root.querySelector('[name="institution"]');
+    const menu = root.querySelector(".institution-picker-menu"), list = root.querySelector('[role="listbox"]');
+    const clear = root.querySelector(".institution-picker-clear"), status = root.querySelector('[role="status"]');
+    const choices = [{ id: "", name: "כל המוסדות" }, ...bootstrap.institutions.map((item) => ({ id: String(item.id), name: item.name }))];
+    let selectedLabel = input.value, results = [], active = -1;
+    const close = () => {
+      menu.hidden = true;
+      input.setAttribute("aria-expanded", "false");
+      input.removeAttribute("aria-activedescendant");
+      active = -1;
+    };
+    const highlight = (index) => {
+      active = index;
+      [...list.children].forEach((option, at) => option.classList.toggle("active", at === active));
+      if (active < 0) input.removeAttribute("aria-activedescendant");
+      else {
+        const option = list.children[active];
+        input.setAttribute("aria-activedescendant", option.id);
+        option.scrollIntoView({ block: "nearest" });
+      }
+    };
+    const open = (query = "") => {
+      results = choices.filter((item) => item.name.toLocaleLowerCase("he-IL").includes(query.trim().toLocaleLowerCase("he-IL")));
+      list.innerHTML = results.map((item, index) => `<div role="option" id="institution-option-${index}" data-index="${index}" aria-selected="${item.id === hidden.value}">${e(item.name)}</div>`).join("");
+      root.querySelector(".institution-picker-empty").hidden = results.length > 0;
+      menu.hidden = false;
+      input.setAttribute("aria-expanded", "true");
+      highlight(-1);
+      status.textContent = results.length ? `${results.length} אפשרויות לבחירה` : "לא נמצאו מוסדות";
+    };
+    const choose = (item) => {
+      hidden.value = item.id;
+      selectedLabel = item.id ? item.name : "";
+      input.value = selectedLabel;
+      input.setCustomValidity("");
+      clear.hidden = !item.id;
+      status.textContent = `נבחר: ${item.name}`;
+      close();
+    };
+    input.addEventListener("focus", () => open(input.value === selectedLabel ? "" : input.value));
+    input.addEventListener("click", () => { if (menu.hidden) open(input.value === selectedLabel ? "" : input.value); });
+    input.addEventListener("input", () => {
+      if (!input.value.trim()) {
+        hidden.value = "";
+        selectedLabel = "";
+      }
+      input.setCustomValidity(input.value === selectedLabel ? "" : "יש לבחור מוסד מהתוצאות או לרוקן את השדה להצגת כל המוסדות.");
+      clear.hidden = !input.value;
+      open(input.value);
     });
+    input.addEventListener("keydown", (event) => {
+      if (event.isComposing) return;
+      if (["ArrowDown", "ArrowUp"].includes(event.key)) {
+        event.preventDefault();
+        if (menu.hidden) open(input.value === selectedLabel ? "" : input.value);
+        if (results.length) highlight(active < 0 ? (event.key === "ArrowDown" ? 0 : results.length - 1) : (active + (event.key === "ArrowDown" ? 1 : -1) + results.length) % results.length);
+      } else if (event.key === "Enter" && !menu.hidden) {
+        if (active >= 0 || results.length === 1) {
+          event.preventDefault();
+          choose(results[active >= 0 ? active : 0]);
+        } else if (input.value !== selectedLabel) {
+          event.preventDefault();
+          input.reportValidity();
+        } else close();
+      } else if (event.key === "Escape" && !menu.hidden) {
+        event.preventDefault();
+        input.value = selectedLabel;
+        input.setCustomValidity("");
+        clear.hidden = !hidden.value;
+        close();
+      }
+    });
+    menu.addEventListener("mousedown", (event) => event.preventDefault());
+    list.addEventListener("click", (event) => {
+      const option = event.target.closest('[role="option"]');
+      if (option) { choose(results[Number(option.dataset.index)]); input.focus(); }
+    });
+    clear.addEventListener("click", () => { choose(choices[0]); input.focus(); });
+    root.addEventListener("focusout", (event) => { if (!root.contains(event.relatedTarget)) close(); });
+  }
+  function bindFilters() {
+    bindInstitutionPicker();
     const period = document.getElementById("filter-period");
     const syncPeriod = () => {
       for (const [kind, field, id] of [["month", "month-field", "filter-month"], ["year", "year-field", "filter-year"], ["range", "from-field", "filter-from"], ["range", "to-field", "filter-to"]]) {

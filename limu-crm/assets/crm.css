@@ -120,6 +120,15 @@
 .lcrm .filters { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; margin-block-end: 18px; padding: 20px; border: 1px solid var(--tint-line); border-radius: 16px; background: #eef2fb; }
 .lcrm .filters > div { min-width: 140px; flex: 1 1 150px; max-width: 250px; }
 .lcrm .filters input, .lcrm .filters select { width: 100%; }
+.lcrm .institution-picker { position: relative; }
+.lcrm .institution-picker-control { position: relative; }
+.lcrm .institution-picker input[role=combobox] { padding-inline-end: 42px; }
+.lcrm .institution-picker-clear { position: absolute; inset-inline-end: 3px; top: 1px; width: 40px; height: 44px; border: 0; border-radius: 9px; background: transparent; color: var(--brand-dark); font-size: 24px; cursor: pointer; }
+.lcrm .institution-picker-menu { position: absolute; top: calc(100% + 5px); inset-inline: 0; z-index: 20; max-height: 240px; overflow-y: auto; overscroll-behavior: contain; padding: 5px; border: 1px solid #8795af; border-radius: 10px; background: #fff; box-shadow: 0 8px 22px #25345326; }
+.lcrm .institution-picker [role=option] { padding: 10px; min-height: 44px; border-radius: 6px; cursor: pointer; overflow-wrap: anywhere; }
+.lcrm .institution-picker [role=option]:hover, .lcrm .institution-picker [role=option].active { background: #e6ebfa; color: var(--brand-dark); }
+.lcrm .institution-picker [aria-selected=true] { font-weight: 700; }
+.lcrm .institution-picker-empty { margin: 0; padding: 10px; }
 .lcrm .filters .button { min-width: 80px; }
 .lcrm .filters button[type=submit] { color: #fff; background: var(--brand); border-color: var(--brand); }
 .lcrm .filters button[type=submit]:hover { background: var(--brand-dark); border-color: var(--brand-dark); }
