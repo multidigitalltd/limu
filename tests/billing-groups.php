@@ -70,7 +70,15 @@ try {
  bg_check(is_wp_error($missing)&&LimuCRM\data($draft['id'])===$draft,'Missing historical rate blocks the whole group without overwriting the draft');
  update_post_meta($b,'_lcrm_agreement',$original_agreement);
  $unaware=bg_post('approve',array('ids'=>array($draft['id'])))->get_data();bg_check(isset($unaware['results'][0]['error'])&&LimuCRM\data($draft['id'])['state']==='draft','An old client cannot approve a group without group-aware acknowledgement');
- $approved=bg_post('approve',array('ids'=>array($draft['id']),'shared_billing'=>true));$bill=$approved->get_data()['results'][0];bg_check($approved->get_status()===200&&$bill['state']==='approved','Group-aware approval succeeds through the real REST endpoint');
+ $unshown=bg_post('approve',array('ids'=>array($draft['id']),'shared_billing'=>true))->get_data();bg_check(isset($unshown['results'][0]['error']),'Group-aware flag alone cannot approve an unseen shared draft');
+ $preview_response=bg_post('icount/bill',array('bill'=>$draft['id']))->get_data();$preview=$preview_response['bill']['approval_revision'];
+ $changed=$original_agreement;$changed['rates'][0]['price']=2100;update_post_meta($b,'_lcrm_agreement',$changed);
+ bg_ok(LimuCRM\locked(fn()=>LimuCRM\prepare_bill($b,$month)));
+ $stale=bg_post('approve',array('ids'=>array($draft['id']),'shared_billing'=>true,'billing_previews'=>array($draft['id']=>$preview)))->get_data();
+ bg_check(isset($stale['results'][0]['error'])&&LimuCRM\data($draft['id'])['state']==='draft'&&LimuCRM\data($draft['id'])['total']===3658,'A previously displayed draft cannot approve a different newly prepared amount');
+ update_post_meta($b,'_lcrm_agreement',$original_agreement);bg_ok(LimuCRM\locked(fn()=>LimuCRM\prepare_bill($b,$month)));
+ $preview_response=bg_post('icount/bill',array('bill'=>$draft['id']))->get_data();$preview=$preview_response['bill']['approval_revision'];
+ $approved=bg_post('approve',array('ids'=>array($draft['id']),'shared_billing'=>true,'billing_previews'=>array($draft['id']=>$preview)));$bill=$approved->get_data()['results'][0];bg_check($approved->get_status()===200&&$bill['state']==='approved','Group-aware approval succeeds through the real REST endpoint');
  bg_check(LimuCRM\data($da['id'])['bill']===$bill['id']&&LimuCRM\data($db['id'])['bill']===$bill['id'],'Approval locks both institutions deliveries into the shared bill');
  bg_check($bill['credit_days']===14,'Group has one explicit credit term');
  bg_check(is_wp_error(LimuCRM\locked(fn()=>LimuCRM\agreement_write($b,$month.'-01','9.00',null))),'Approved group month locks each member retrospective tariff');
@@ -162,6 +170,9 @@ try {
  for($n=1;$n<=30;$n++)foreach(array(1,2,3,7,19,100) as $den)foreach(array(0,1,$den) as $weight){list($q,$rem)=LimuCRM\billing_ratio($n,$weight,$den);if($q!==intdiv($n*$weight,$den)||$rem!==($n*$weight)%$den)throw new RuntimeException('Integer ratio mismatch');}
  list($q,$rem)=LimuCRM\billing_ratio(PHP_INT_MAX-1,PHP_INT_MAX-1,PHP_INT_MAX);bg_check($q===PHP_INT_MAX-2&&$rem===1,'Proportional allocation remains exact at 64-bit multiplication overflow boundary');
  bg_check(true,'Small quotient/remainder cases agree with integer arithmetic');
+ $tainted=array_merge($lead,array('date'=>current_time('Y-m-d').' 00:00:00','phone'=>'0509999991','email'=>'tainted-lead@example.test','billing_group'=>$id,'billing_members'=>array($a,$c)));
+ $tainted_result=bg_ok(LimuCRM\locked(fn()=>LimuCRM\record_delivery($tainted,$a,'tainted-group:'.wp_generate_uuid4(),false)));
+ bg_check(array_map('intval',get_post_meta($tainted_result['id'],'_lcrm_institution',false))===array($a)&&LimuCRM\query_records('lcrm_delivery',array('institution'=>$c),1,30)['total']===0,'Group-like fields on lead input cannot add another institution to its access index');
  echo "OK $bg_count shared billing assertions\n";
 } finally {
  if($bg_mock)remove_filter('pre_http_request',$bg_mock,10);

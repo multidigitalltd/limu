@@ -301,7 +301,7 @@ function raw_records( $ids ) {
  * @return mixed Operation result or validation error.
  */
 function save_record( $type, $payload, $id = 0 ) {
-	if ( ! empty( $payload['billing_group'] ) && ! isset( $GLOBALS['lcrm_changed_records'] ) ) {
+	if ( in_array( $type, array( 'lcrm_bill', 'lcrm_payment' ), true ) && ! empty( $payload['billing_group'] ) && ! isset( $GLOBALS['lcrm_changed_records'] ) ) {
 		return error( 'רשומת גבייה משותפת מחייבת שמירה מאובטחת.', 500 );
 	}
 	if ( 'lcrm_bill' === $type ) {
@@ -352,7 +352,7 @@ function save_record( $type, $payload, $id = 0 ) {
 		} else {
 			continue;
 		}
-		if ( 'institution' === $key && ! empty( $payload['billing_group'] ) ) {
+		if ( 'institution' === $key && in_array( $type, array( 'lcrm_bill', 'lcrm_payment' ), true ) && ! empty( $payload['billing_group'] ) ) {
 			$members = billing_members( $payload );
 			if ( 'lcrm_payment' === $type ) {
 				$members = array_keys( array_filter( $payload['allocations'], static fn( $amount ) => $amount > 0 ) );

@@ -121,6 +121,9 @@ function institution_list() {
  * @return mixed Operation result or validation error.
  */
 function public_item( $item ) {
+	if ( manager() && ! empty( $item['billing_group'] ) && empty( $item['scoped_group'] ) && 'draft' === ( $item['state'] ?? '' ) && 'lcrm_bill' === get_post_type( $item['id'] ?? 0 ) ) {
+		$item['approval_revision'] = billing_revision( $item );
+	}
 	if ( isset( $item['id'] ) && 'lcrm_delivery' === get_post_type( $item['id'] ) ) {
 		$item['billing_excluded'] = ! empty( $item['billing_excluded'] );
 	}
@@ -342,6 +345,17 @@ function write_api( $request ) {
 	}
 	$route = basename( $request->get_route() );
 	foreach ( $input as $key => $value ) {
+		if ( 'billing_previews' === $key ) {
+			if ( 'approve' !== $route || ! is_array( $value ) || count( $value ) > 20 ) {
+				return error( 'פרטי טיוטות לא תקינים.' );
+			}
+			foreach ( $value as $bill_id => $revision ) {
+				if ( ! preg_match( '/^[1-9]\d{0,9}$/D', (string) $bill_id ) || ! is_string( $revision ) || ! preg_match( '/^[a-f0-9]{64}$/D', $revision ) ) {
+					return error( 'פרטי טיוטות לא תקינים.' );
+				}
+			}
+			continue;
+		}
 		if ( 'forms' === $key ) {
 			// Accept only the empty JSON array sent by older settings clients; do not persist it.
 			$legacy_input = json_decode( $request->get_body() );
@@ -534,7 +548,7 @@ function write_api( $request ) {
 			$was_approved = 'lcrm_bill' === get_post_type( $id ) && 'approved' === ( raw_records( array( $id ) )[0]['state'] ?? '' );
 			$r            = attempt(
 				function () use ( $id, $input ) {
-					$ack = billing_acknowledgement( $id, $input );
+					$ack = billing_approval_intent( $id, $input );
 					return is_wp_error( $ack ) ? $ack : approve_bill( $id );
 				}
 			);

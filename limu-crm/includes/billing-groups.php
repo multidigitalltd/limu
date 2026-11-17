@@ -239,6 +239,47 @@ function billing_acknowledgement( $id, $input ) {
 }
 
 /**
+ * Bind human approval to the exact shared draft shown by the server.
+ *
+ * @param array $bill Full, unprojected bill snapshot.
+ * @return string SHA256 of the business fields in the displayed draft.
+ * @throws \RuntimeException When a draft cannot be serialized safely.
+ */
+function billing_revision( $bill ) {
+	$fields = array();
+	foreach ( array( 'id', 'institution', 'billing_group', 'group_name', 'billing_members', 'month', 'state', 'lines', 'shares', 'subtotal', 'vat', 'total', 'credit_days' ) as $key ) {
+		$fields[ $key ] = $bill[ $key ] ?? null;
+	}
+	$json = wp_json_encode( $fields );
+	if ( ! is_string( $json ) ) {
+		throw new \RuntimeException( 'Shared draft cannot be encoded.' );
+	}
+	return hash( 'sha256', $json );
+}
+
+/**
+ * Reject approval from a stale or partial shared-bill preview.
+ *
+ * @param int   $id Bill ID.
+ * @param array $input Request fields.
+ * @return true|\WP_Error Whether the current draft matches the human preview.
+ */
+function billing_approval_intent( $id, $input ) {
+	$ack = billing_acknowledgement( $id, $input );
+	if ( is_wp_error( $ack ) ) {
+		return $ack;
+	}
+	$bill = raw_records( array( $id ) )[0];
+	if ( ! empty( $bill['billing_group'] ) && 'draft' === $bill['state'] ) {
+		$preview = $input['billing_previews'][ $id ] ?? null;
+		if ( ! is_string( $preview ) || ! hash_equals( billing_revision( $bill ), $preview ) ) {
+			return error( 'טיוטת החיוב המשותף השתנתה או לא הוצגה במלואה. יש לרענן ולבדוק לפני אישור.', 409 );
+		}
+	}
+	return true;
+}
+
+/**
  * Resolve snapshot membership without replacing the payer institution.
  *
  * @param array $bill Bill/payment snapshot.

@@ -796,7 +796,8 @@
         notice("יש לבחור חיובים לאישור", true);
         return;
       }
-      const total = items.filter((i) => selected.includes(i.id)).reduce((sum, i) => sum + i.total, 0);
+      const selectedSnapshots = items.filter((bill) => selected.includes(bill.id));
+      const total = selectedSnapshots.reduce((sum, i) => sum + i.total, 0);
       openModal(`<h2 id="modal-title">אישור ${selected.length} חיובים</h2>
         <p>סכום כולל: <strong>${money(total)}</strong></p>${items.some((bill) => selected.includes(bill.id) && bill.billing_group) ? '<p class="callout">האישור כולל חיובים משותפים עבור קבוצות שלמות.</p>' : ""}
         <p class="muted">לאחר האישור הסכומים והלידים בחיוב יינעלו. הסכום מחושב שוב בשרת לפני אישור.</p>
@@ -807,7 +808,7 @@
           let failures = [];
           for (let i = 0; i < selected.length; i += 20) {
             const batch = selected.slice(i, i + 20);
-            const r = await api("approve", { ids: batch, ...items.some((bill) => batch.includes(bill.id) && bill.billing_group) ? { shared_billing: true } : {} });
+            const r = await api("approve", { ids: batch, ...selectedSnapshots.some((bill) => batch.includes(bill.id) && bill.billing_group) ? { shared_billing: true, billing_previews: Object.fromEntries(selectedSnapshots.filter((bill) => batch.includes(bill.id) && bill.billing_group).map((bill) => [bill.id, bill.approval_revision])) } : {} });
             failures.push(...r.results.filter((x) => x.error));
           }
           if (failures.length) throw new Error(failures.map((x) => `${x.id}: ${x.error}`).join(" · "));
