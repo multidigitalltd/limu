@@ -3,7 +3,7 @@
  * Plugin Name: crm
  * Description: crm
  * Update URI: false
- * Version: 0.1.16
+ * Version: 0.1.17
  * Requires at least: 6.6
  * Requires PHP: 8.3
  * License: GPL-2.0-or-later
@@ -18,11 +18,12 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 define( 'LIMU_CRM_FILE', __FILE__ );
-define( 'LIMU_CRM_VERSION', '0.1.16' );
+define( 'LIMU_CRM_VERSION', '0.1.17' );
 require_once __DIR__ . '/includes/assets.php';
 require_once __DIR__ . '/includes/domain.php';
 require_once __DIR__ . '/includes/store.php';
 require_once __DIR__ . '/includes/agreements.php';
+require_once __DIR__ . '/includes/billing-groups.php';
 require_once __DIR__ . '/includes/duplicate-index.php';
 require_once __DIR__ . '/includes/api.php';
 require_once __DIR__ . '/includes/read-cache.php';
@@ -210,7 +211,7 @@ add_action(
 		$month  = $today->modify( 'first day of last month' )->format( 'Y-m' );
 		$result = locked(
 			function () use ( $month ) {
-				$institutions   = get_posts(
+				$institutions = get_posts(
 					array(
 						'post_type'      => 'institutions',
 						'post_status'    => array( 'publish', 'draft' ),
@@ -219,8 +220,22 @@ add_action(
 						'no_found_rows'  => true,
 					)
 				);
+				$registry     = billing_groups();
+				if ( is_wp_error( $registry ) ) {
+					return $registry;
+				}
+				$seen           = array();
 				$newly_approved = array();
 				foreach ( $institutions as $id ) {
+					$group = billing_group_for( $id, $month, $registry );
+					if ( is_wp_error( $group ) ) {
+						return $group;
+					}
+					$key = $group ? 'group:' . $group['id'] : 'institution:' . $id;
+					if ( isset( $seen[ $key ] ) ) {
+						continue;
+					}
+					$seen[ $key ] = true;
 					if ( ! agreement( $id ) ) {
 						continue;
 					}

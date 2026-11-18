@@ -17,6 +17,7 @@
     reports: "דוחות",
     capture: "טיפול בקליטה",
     institutions: "מוסדות ותעריפים",
+    groups: "קבוצות גבייה",
     settings: "הגדרות והרשאות",
     audit: "יומן פעילות"
   };
@@ -749,6 +750,7 @@
     document.getElementById("export").addEventListener("click", () => download("deliveries"));
     document.getElementById("print-leads").addEventListener("click", () => printReport("deliveries"));
   }
+  const billName = (bill) => bill.group_name || name(bill.institution);
   function billTable(rows, selectable) {
     return `<div class="table-wrap" tabindex="0" role="region" aria-label="טבלת חיובים חודשיים">
       <table><caption class="sr-only">חיובים חודשיים</caption>
@@ -764,14 +766,14 @@
       <th scope="col" class="no-print">פעולות</th>
       </tr>
       </thead>
-      <tbody>${rows.map((b) => `<tr>${selectable ? `<td class="no-print">${b.state === "draft" ? `<input class="bill-check" type="checkbox" value="${e(b.id)}" aria-label="בחירת חיוב ${e(name(b.institution))} ${e(b.month)}">` : ""}</td>` : ""}<td>${e(name(b.institution))}</td>
+      <tbody>${rows.map((b) => `<tr>${selectable ? `<td class="no-print">${b.state === "draft" && !b.scoped_group ? `<input class="bill-check" type="checkbox" value="${e(b.id)}" aria-label="בחירת חיוב ${e(billName(b))} ${e(b.month)}">` : ""}</td>` : ""}<td>${e(billName(b))}</td>
       <td>${e(b.month)}</td>
       <td>${b.lines ? b.lines.length : e(b.count || "—")}</td>
       <td class="amount">${money(b.total)}</td>
       <td class="amount">${money(b.paid)}</td>
       <td class="amount">${money(b.total - b.paid)}</td>
       <td>${e(b.due || "טרם אושר")}</td>
-      <td>${badge(stateName(b.state), b.state === "approved" ? "green" : "orange")}${fiscalDocuments(b).length ? "<br>" + fiscalBadge(b) : ""}</td>
+      <td>${badge(stateName(b.state), b.state === "approved" ? "green" : "orange")}${b.scoped_group && b.state === "draft" ? '<p class="muted">לאישור הקבוצה יש לבחור כל המוסדות במסנן.</p>' : ""}${fiscalDocuments(b).length ? "<br>" + fiscalBadge(b) : ""}</td>
       <td class="no-print">
       <button class="row-link" data-bill="${e(b.id)}">פירוט</button>${bootstrap.manager && b.state === "approved" && b.paid < b.total ? `<button class="button" data-payment="${e(b.id)}">רישום תשלום</button>` : ""}</td>
       </tr>`).join("")}</tbody>
@@ -794,9 +796,10 @@
         notice("יש לבחור חיובים לאישור", true);
         return;
       }
-      const total = items.filter((i) => selected.includes(i.id)).reduce((sum, i) => sum + i.total, 0);
+      const selectedSnapshots = items.filter((bill) => selected.includes(bill.id));
+      const total = selectedSnapshots.reduce((sum, i) => sum + i.total, 0);
       openModal(`<h2 id="modal-title">אישור ${selected.length} חיובים</h2>
-        <p>סכום כולל: <strong>${money(total)}</strong></p>
+        <p>סכום כולל: <strong>${money(total)}</strong></p>${items.some((bill) => selected.includes(bill.id) && bill.billing_group) ? '<p class="callout">האישור כולל חיובים משותפים עבור קבוצות שלמות.</p>' : ""}
         <p class="muted">לאחר האישור הסכומים והלידים בחיוב יינעלו. הסכום מחושב שוב בשרת לפני אישור.</p>
         <form id="approve-form">${formError}<button type="submit" class="button primary">אישור החיובים</button></form>`);
       document.getElementById("approve-form").addEventListener("submit", (ev) => {
@@ -804,7 +807,8 @@
         submit(ev.target, async () => {
           let failures = [];
           for (let i = 0; i < selected.length; i += 20) {
-            const r = await api("approve", { ids: selected.slice(i, i + 20) });
+            const batch = selected.slice(i, i + 20);
+            const r = await api("approve", { ids: batch, ...selectedSnapshots.some((bill) => batch.includes(bill.id) && bill.billing_group) ? { shared_billing: true, billing_previews: Object.fromEntries(selectedSnapshots.filter((bill) => batch.includes(bill.id) && bill.billing_group).map((bill) => [bill.id, bill.approval_revision])) } : {} });
             failures.push(...r.results.filter((x) => x.error));
           }
           if (failures.length) throw new Error(failures.map((x) => `${x.id}: ${x.error}`).join(" · "));
@@ -814,11 +818,17 @@
   }
   function bindBillDetails() {
     screen.querySelectorAll("[data-bill]").forEach((button) => button.addEventListener("click", () => billModal(items.find((i) => i.id === Number(button.dataset.bill)))));
-    screen.querySelectorAll("[data-payment]").forEach((button) => button.addEventListener("click", () => paymentModal(items.find((i) => i.id === Number(button.dataset.payment)))));
+    screen.querySelectorAll("[data-payment]").forEach((button) => button.addEventListener("click", async () => {
+      const bill = items.find((i) => i.id === Number(button.dataset.payment));
+      try {
+        const full = bill.scoped_group ? (await api("icount/bill", { bill: bill.id })).bill : bill;
+        paymentModal(full);
+      } catch (error) { notice(error.message, true, error.authExpired); }
+    }));
   }
   function billDetailsMarkup(b, payments) {
     const c = icountInfo(), client = bootstrap.institutions.find((i) => i.id === Number(b.institution))?.icount_client;
-    const ready = bootstrap.manager && c.configured && c.verified && client && b.state === "approved" && payments !== null;
+    const ready = !b.scoped_group && bootstrap.manager && c.configured && c.verified && client && b.state === "approved" && payments !== null;
     const invoiced = fiscalIssued(b, "invoice") || fiscalIssued(b, "invrec") || (payments || []).some((p) => fiscalIssued(p, "invrec"));
     const uncertain = fiscalWaiting(b) || (payments || []).some(fiscalWaiting);
     const documentActions = ready ? `<div class="actions">
@@ -833,8 +843,9 @@
         <p class="muted">${e(p.date)}${p.reference ? " · " + e(p.reference) : ""}</p>${documentsMarkup(p)}${bootstrap.manager && !hasReceipt ? `<button class="button" data-fiscal-payment="${e(p.id)}" ${permitted ? "" : "disabled"}>הפקת ${e(documentNames[type])}</button>${ready && !full && !fiscalIssued(b, "invoice") ? '<p class="muted">לתשלום חלקי יש להפיק תחילה חשבונית מס על החיוב המלא, ואז קבלה על התשלום.</p>' : ""}` : ""}</section>`;
     }).join("") : '<p class="muted">טרם נרשמו תשלומים.</p>';
     const billDocuments = bootstrap.manager ? { ...b, documents: fiscalDocuments(b).filter((d) => Number(d.target || b.id) === Number(b.id)) } : b;
-    return `<h2 id="modal-title">חיוב ${e(name(b.institution))}</h2>
+    return `<h2 id="modal-title">חיוב ${e(billName(b))}</h2>
       <p>${e(b.month)} · ${e(stateName(b.state))}</p>
+      ${b.shares ? `<h3>פירוט לפי מוסד</h3><div class="table-wrap" tabindex="0" role="region" aria-label="חלוקת החיוב בין המוסדות"><table><thead><tr><th scope="col">מוסד</th><th scope="col">לידים</th><th scope="col">כולל מע״מ</th><th scope="col">שולם</th><th scope="col">יתרה</th></tr></thead><tbody>${Object.values(b.shares).map((share) => `<tr><td>${e(share.name)}</td><td>${e(share.count)}</td><td>${money(share.total)}</td><td>${money(share.paid)}</td><td>${money(share.total-share.paid)}</td></tr>`).join("")}</tbody></table></div>` : ""}
       <dl class="detail-list">
       <dt>לפני מע״מ</dt>
       <dd>${money(b.subtotal)}</dd>
@@ -855,7 +866,7 @@
       <dt>היסטוריים</dt>
       <dd>${e(b.historical)} · לא לחיוב</dd>
       </dl>${b.lines ? `<h3>לידים בחיוב</h3>
-      <p class="muted">${b.lines.map((l) => `#${e(l.delivery)} · ${money(l.price)} לפני מע״מ`).join("<br>")}</p>` : ""}<h3>מסמכי iCount</h3>${documentsMarkup(billDocuments) || '<p class="muted">טרם הופק מסמך לחיוב.</p>'}${documentActions}${bootstrap.manager && b.state === "approved" && !client ? '<p class="muted">יש לשייך למוסד לקוח iCount במסך המוסדות לפני הפקת מסמך.</p>' : ""}${bootstrap.manager ? `<h3>תשלומים שנרשמו</h3>${paymentList}` : ""}`;
+      <p class="muted">${b.lines.map((l) => `${l.institution_name ? e(l.institution_name) + " · " : ""}#${e(l.delivery)} · ${money(l.price)} לפני מע״מ`).join("<br>")}</p>` : ""}<h3>מסמכי iCount</h3>${documentsMarkup(billDocuments) || '<p class="muted">טרם הופק מסמך לחיוב.</p>'}${documentActions}${bootstrap.manager && b.state === "approved" && !client ? '<p class="muted">יש לשייך למוסד לקוח iCount במסך המוסדות לפני הפקת מסמך.</p>' : ""}${bootstrap.manager ? `<h3>תשלומים שנרשמו</h3>${paymentList}` : ""}`;
   }
   async function billModal(b) {
     openModal(billDetailsMarkup(b, bootstrap.manager && bootstrap.icount ? null : []));
@@ -887,13 +898,13 @@
   }
   function issueModal(b, doctype) {
     openModal(`<h2 id="modal-title">הפקת ${e(documentNames[doctype])}</h2>
-      <p>${e(name(b.institution))} · ${e(b.month)}</p>
+      <p>${e(billName(b))} · ${e(b.month)}</p>
       <p>סכום כולל מע״מ 18%: <strong>${money(b.total)}</strong></p>
       <p class="muted">המסמך יופק ב־iCount עבור הלקוח המשויך למוסד. שליחה באימייל וב־SMS כבויה.</p>
       <form id="fiscal-issue-form">${formError}<button class="button primary" type="submit">אישור והפקת ${e(documentNames[doctype])}</button></form>`);
     document.getElementById("fiscal-issue-form").addEventListener("submit", (ev) => {
       ev.preventDefault();
-      fiscalSubmit(ev.target, "icount/issue", { bill: b.id, doctype });
+      fiscalSubmit(ev.target, "icount/issue", { bill: b.id, doctype, ...b.billing_group ? { shared_billing: true } : {} });
     });
   }
   function reconcileModal(target, doctype) {
@@ -917,19 +928,20 @@
       <label for="check-date">תאריך פירעון ההמחאה</label>
       <input id="check-date" name="check_date" type="date" value="${e(payment.date)}" required></div>` : "";
     openModal(`<h2 id="modal-title">הפקת ${e(documentNames[type])}</h2>
-      <p>${e(name(b.institution))} · תשלום ${money(payment.amount)}</p>
+      <p>${e(billName(b))} · תשלום ${money(payment.amount)}</p>
       <p class="muted">${e(payment.date)} · ${e(paymentNames[method] || method)}</p>${supported ? `<form id="fiscal-payment-form">
       <div class="form-grid">${fields}</div>${method === "transfer" && !accounts.length ? '<p class="callout">לא נמצאו חשבונות בנק ב־iCount. יש להגדיר חשבון במערכת ולבדוק שוב את החיבור.</p>' : ""}<p class="muted">המסמך יופק ב־iCount על התשלום שכבר נרשם. שליחה באימייל וב־SMS כבויה.</p>${formError}<button class="button primary" type="submit" ${method === "transfer" && !accounts.length ? "disabled" : ""}>אישור והפקת ${e(documentNames[type])}</button></form>` : '<p class="callout">הפקת מסמך לתשלום באמצעי זה אינה זמינה עדיין. התשלום נשאר רשום במערכת.</p>'}`);
     document.getElementById("fiscal-payment-form")?.addEventListener("submit", (ev) => {
       ev.preventDefault();
       const data = Object.fromEntries(new FormData(ev.target));
-      fiscalSubmit(ev.target, "icount/payment", { payment: payment.id, ...data });
+      fiscalSubmit(ev.target, "icount/payment", { payment: payment.id, ...data, ...b.billing_group ? { shared_billing: true } : {} });
     });
   }
   function paymentModal(bill) {
     const key = crypto.randomUUID();
     openModal(`<h2 id="modal-title">רישום תשלום</h2>
-      <p>${e(name(bill.institution))} · יתרה ${money(bill.total - bill.paid)}</p>
+      <p>${e(billName(bill))} · יתרה ${money(bill.total - bill.paid)}</p>
+      ${bill.billing_members ? `<p class="callout">התשלום נרשם עבור הקבוצה כולה. תשלום חלקי יחולק יחסית ליתרות המוסדות, באגורות מדויקות. גורם משלם: ${e(name(bill.institution))}.</p>` : ""}
       <form id="payment-form">
       <div class="form-grid">
       <div>
@@ -949,7 +961,7 @@
       <p class="callout">התשלום יירשם במערכת. לאחר הרישום אפשר להפיק חשבונית מס / קבלה או קבלה דרך פירוט החיוב.</p>${formError}<button class="button primary" type="submit">אישור רישום תשלום</button></form>`);
     document.getElementById("payment-form").addEventListener("submit", (ev) => {
       ev.preventDefault();
-      submit(ev.target, (data) => api("payment", { bill: bill.id, request_key: key, ...data }));
+      submit(ev.target, (data) => api("payment", { bill: bill.id, request_key: key, ...data, ...bill.billing_group ? { shared_billing: true } : {} }));
     });
   }
   function prepareModal() {
@@ -1029,6 +1041,44 @@
     document.getElementById("institution-selected-count").textContent = `מוסדות נבחרים: ${selectedInstitutions.size}`;
     document.getElementById("institution-search").disabled = bulkRatesSaving;
     document.getElementById("institution-status").disabled = bulkRatesSaving;
+  }
+  async function billingGroupsView(token) {
+    if (!bootstrap.manager) throw new Error("אין הרשאה");
+    const result = await api("billing-groups");
+    if (token !== generation) return;
+    screen.innerHTML = heading("קבוצות גבייה", "מוסדות נפרדים עם חיוב חודשי אחד וגורם משלם משותף", '<button class="button primary" id="new-billing-group">קבוצת גבייה חדשה</button>') +
+      '<p class="callout">לכל מוסד נשמרים התעריף, הזכאות וכללי הכפילות שלו. אותה פנייה לשני מוסדות יכולה להתחייב אצל כל אחד. תשלום חלקי מחולק יחסית ליתרות, באגורות מדויקות. חיובי עבר נשמרים; כל קבוצה מתחילה בחודש שנבחר.</p>' +
+      (result.items.length ? `<div class="institution-grid">${result.items.map((group) => `<section class="card">
+        <h2>${e(group.name)}</h2><p>${group.members.map((id) => e(name(id))).join(" · ")}</p>
+        <p>גורם משלם ולקוח iCount: ${e(name(group.payer))}</p><p>תחילה: ${e(group.from)} · ${e(group.credit_days)} ימי אשראי</p>
+        <p>${group.cancelled ? "בוטלה לפני הכנת חיובים" : group.until ? "חודש סיום (כולל): " + e(group.until) : "ללא חודש סיום"}</p>
+        ${!group.cancelled && !group.until ? `<div class="actions"><button class="button" data-close-group="${e(group.id)}">קביעת חודש סיום</button><button class="button" data-cancel-group="${e(group.id)}">ביטול קבוצה שטרם חויבה</button></div>` : ""}</section>`).join("")}</div>` : empty("טרם הוגדרו קבוצות גבייה"));
+    document.getElementById("new-billing-group").addEventListener("click", () => {
+      const id = crypto.randomUUID();
+      openModal(`<h2 id="modal-title">קבוצת גבייה חדשה</h2><form id="billing-group-form"><div class="form-grid">
+        <div class="wide"><label for="group-name">שם הקבוצה</label><input id="group-name" name="name" maxlength="150" required></div>
+        <div class="wide"><label for="group-members">מוסדות בקבוצה (2–20, בחירה מרובה)</label><select id="group-members" name="members" multiple size="6" required>${institutionOptions("", false)}</select></div>
+        <div><label for="group-payer">מוסד משלם מתוך הקבוצה</label><select id="group-payer" name="payer" required>${institutionOptions("", false)}</select></div>
+        <div><label for="group-from">חודש תחילת גבייה משותפת</label><input id="group-from" name="from" type="month" min="${e(bootstrap.month)}" value="${e(bootstrap.month)}" required></div>
+        <div><label for="group-credit">ימי אשראי לקבוצה</label><input id="group-credit" name="credit_days" type="number" min="0" max="365" step="1" value="30" required></div>
+      </div><p class="muted">המסמך יופק ללקוח iCount של המוסד המשלם. לא משנים חיובים שכבר אושרו. לאחר הכנת חיובים ניתן לקבוע סיום עתידי, אך לא למחוק או לשנות את הרכב הקבוצה בעבר.</p>${formError}<button class="button primary" type="submit">שמירת קבוצת גבייה</button></form>`);
+      document.getElementById("billing-group-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        const form = event.target, data = Object.fromEntries(new FormData(form));
+        const members = [...form.elements.members.selectedOptions].map((option) => Number(option.value));
+        submit(form, () => api("billing-groups", { id, name: data.name, members, payer: Number(data.payer), from: data.from, credit_days: Number(data.credit_days) }));
+      });
+    });
+    screen.querySelectorAll("[data-close-group], [data-cancel-group]").forEach((button) => button.addEventListener("click", () => {
+      const id = button.dataset.closeGroup || button.dataset.cancelGroup, cancel = Boolean(button.dataset.cancelGroup);
+      const group = result.items.find((item) => item.id === id);
+      openModal(`<h2 id="modal-title">${cancel ? "ביטול קבוצה שטרם חויבה" : "סיום קבוצת גבייה"}</h2><p>${e(group.name)}</p>
+        <form id="close-group-form">${cancel ? '<p>הביטול אפשרי רק אם לא הוכנו לקבוצה חיובים. הגדרת הקבוצה תישמר ביומן.</p>' : `<label for="group-until">חודש אחרון לחיוב משותף (כולל)</label><input id="group-until" name="until" type="month" min="${e(group.from > bootstrap.month ? group.from : bootstrap.month)}" value="${e(group.from > bootstrap.month ? group.from : bootstrap.month)}" required><p>לאחר חודש זה, כל מוסד יחזור לחיוב נפרד. חיובי הקבוצה הקיימים והתשלומים נשמרים.</p>`}${formError}<button class="button primary" type="submit">אישור</button></form>`);
+      document.getElementById("close-group-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        submit(event.target, (data) => api("billing-groups", cancel ? { id, cancelled: true } : { id, until: data.until }));
+      });
+    }));
   }
   async function institutions(token) {
     if (token !== generation) return;
@@ -1371,6 +1421,7 @@
     bill_approved: "חיוב אושר",
     payment_recorded: "תשלום נרשם",
     agreement_changed: "תעריף עודכן",
+    billing_group_changed: "קבוצת גבייה עודכנה",
     settings_changed: "הגדרות עודכנו",
     member_access_changed: "הרשאות מוסד עודכנו",
     history_batch: "יבוא היסטוריה",
@@ -1417,7 +1468,7 @@
     screen.setAttribute("aria-busy", "true");
     document.getElementById("breadcrumb").textContent = titles[view];
     try {
-      await { dashboard, deliveries, bills, reports, capture: captureCases, institutions, settings: settingsView, audit: auditView }[view](token);
+      await { dashboard, deliveries, bills, reports, capture: captureCases, institutions, groups: billingGroupsView, settings: settingsView, audit: auditView }[view](token);
     } catch (err) {
       if (token === generation) {
         screen.innerHTML = '<section class="card"><h1>לא ניתן לטעון את הנתונים</h1><p id="load-error"></p><button class="button" id="retry">ניסיון חוזר</button></section>';

@@ -301,6 +301,12 @@ function raw_records( $ids ) {
  * @return mixed Operation result or validation error.
  */
 function save_record( $type, $payload, $id = 0 ) {
+	if ( in_array( $type, array( 'lcrm_bill', 'lcrm_payment' ), true ) && ! empty( $payload['billing_group'] ) && ! isset( $GLOBALS['lcrm_changed_records'] ) ) {
+		return error( 'רשומת גבייה משותפת מחייבת שמירה מאובטחת.', 500 );
+	}
+	if ( 'lcrm_bill' === $type ) {
+		billing_validate_bill( $payload );
+	}
 	if ( 'lcrm_delivery' === $type && array_key_exists( 'billing_excluded', $payload ) && ! is_bool( $payload['billing_excluded'] ) ) {
 		return error( 'מצב החרגה מחיוב לא תקין.', 500 );
 	}
@@ -336,7 +342,7 @@ function save_record( $type, $payload, $id = 0 ) {
 	}
 	$payload['id'] = $saved;
 	update_post_meta( $saved, '_lcrm_data', wp_slash( $payload ) );
-	foreach ( array( 'institution', 'month', 'state', 'source', 'date', 'bill', 'billing_excluded', 'phone_key', 'email_key' ) as $key ) {
+	foreach ( array( 'institution', 'month', 'state', 'source', 'date', 'bill', 'billing_group', 'billing_excluded', 'phone_key', 'email_key' ) as $key ) {
 		if ( 'billing_excluded' === $key && 'lcrm_delivery' === $type ) {
 			$value = (int) ( $payload['billing_excluded'] ?? false );
 		} elseif ( in_array( $key, array( 'phone_key', 'email_key' ), true ) && 'lcrm_delivery' === $type ) {
@@ -344,6 +350,25 @@ function save_record( $type, $payload, $id = 0 ) {
 		} elseif ( isset( $payload[ $key ] ) ) {
 			$value = $payload[ $key ];
 		} else {
+			continue;
+		}
+		if ( 'institution' === $key && in_array( $type, array( 'lcrm_bill', 'lcrm_payment' ), true ) && ! empty( $payload['billing_group'] ) ) {
+			$members = billing_members( $payload );
+			if ( 'lcrm_payment' === $type ) {
+				$members = array_keys( array_filter( $payload['allocations'], static fn( $amount ) => $amount > 0 ) );
+			}
+			delete_post_meta( $saved, '_lcrm_institution' );
+			if ( get_post_meta( $saved, '_lcrm_institution', false ) ) {
+				return error( 'ניקוי אינדקס הגבייה נכשל.', 500 );
+			}
+			foreach ( $members as $member ) {
+				if ( ! add_post_meta( $saved, '_lcrm_institution', (int) $member ) ) {
+					return error( 'שמירת אינדקס הגבייה נכשלה.', 500 );
+				}
+			}
+			if ( array_map( 'intval', get_post_meta( $saved, '_lcrm_institution', false ) ) !== $members ) {
+				return error( 'אימות אינדקס הגבייה נכשל.', 500 );
+			}
 			continue;
 		}
 		update_post_meta( $saved, '_lcrm_' . $key, wp_slash( $value ) );
@@ -518,6 +543,9 @@ function query_records( $type, $filters = array(), $page = 1, $limit = 30, $sear
 		);
 	} else {
 		$items = raw_records( wp_list_pluck( $q->posts, 'ID' ) );
+	}
+	if ( in_array( $type, array( 'lcrm_bill', 'lcrm_payment' ), true ) ) {
+		$items = array_map( static fn( $item ) => billing_project( $item, $filters ), $items );
 	}
 	return array(
 		'items' => $items,
@@ -767,7 +795,7 @@ function bill_for( $id, $month ) {
 			'cache_results'  => false,
 			'post_type'      => 'lcrm_bill',
 			'post_status'    => 'private',
-			'posts_per_page' => 1,
+			'posts_per_page' => 2,
 			'fields'         => 'ids',
 			'meta_query'     => array(
 				array(
@@ -788,11 +816,15 @@ function bill_for( $id, $month ) {
 	if ( ! $ids ) {
 		return null;
 	}
+	if ( count( $ids ) > 1 ) {
+		throw new \RuntimeException( 'Overlapping billing snapshots.' );
+	}
 	$items = raw_records( $ids );
 	$bill  = $items[0];
-	if ( ! isset( $bill['state'], $bill['institution'], $bill['month'] ) || ! in_array( $bill['state'], array( 'draft', 'approved' ), true ) || ( ! is_int( $bill['institution'] ) && ! is_string( $bill['institution'] ) ) || (string) $id !== (string) $bill['institution'] || $month !== $bill['month'] ) {
+	if ( ! isset( $bill['state'], $bill['institution'], $bill['month'] ) || ! in_array( $bill['state'], array( 'draft', 'approved' ), true ) || ( ! is_int( $bill['institution'] ) && ! is_string( $bill['institution'] ) ) || ! in_array( (int) $id, billing_members( $bill ), true ) || $month !== $bill['month'] ) {
 		throw new \RuntimeException( 'Billing period snapshot is invalid.' );
 	}
+	billing_validate_bill( $bill );
 	return $bill;
 }
 /**
@@ -806,14 +838,24 @@ function prepare_bill( $id, $month ) {
 	if ( ! preg_match( '/^\d{4}-(0[1-9]|1[0-2])$/D', $month ) || $month >= current_time( 'Y-m' ) ) {
 		return error( 'ניתן לסכם רק חודש שהסתיים.' );
 	}
+	$existing = bill_for( $id, $month );
+	if ( $existing && 'approved' === $existing['state'] ) {
+		return $existing;
+	}
+	$group = billing_group_for( $id, $month );
+	if ( is_wp_error( $group ) ) {
+		return $group;
+	}
+	if ( $group ) {
+		return prepare_group_bill( $group, $month );
+	}
+	if ( $existing && ! empty( $existing['billing_group'] ) ) {
+		return error( 'הגדרת הקבוצה אינה תואמת לטיוטה הקיימת.', 409 );
+	}
 	$s      = settings();
 	$config = agreement( $id );
 	if ( ! $config || ! valid_date( $s['start_date'] ) ) {
 		return error( 'יש להגדיר הסכם ותאריך תחילת חיוב.' );
-	}
-	$existing = bill_for( $id, $month );
-	if ( $existing && 'approved' === $existing['state'] ) {
-		return $existing;
 	}
 	$first = $month . '-01 00:00:00';
 	$end   = ( new \DateTimeImmutable( $first, wp_timezone() ) )->modify( 'last day of this month' )->format( 'Y-m-d' ) . ' 23:59:59';
@@ -893,12 +935,13 @@ function approve_bill( $id ) {
 	if ( 'approved' === $bill['state'] ) {
 		return $bill;
 	}
+	billing_validate_bill( $bill );
 	$preview = $bill;
 	$bill    = prepare_bill( $bill['institution'], $bill['month'] );
 	if ( is_wp_error( $bill ) ) {
 		return $bill;
 	}
-	if ( $preview['lines'] !== $bill['lines'] || $preview['total'] !== $bill['total'] || $preview['credit_days'] !== $bill['credit_days'] ) {
+	if ( $preview['lines'] !== $bill['lines'] || $preview['total'] !== $bill['total'] || $preview['credit_days'] !== $bill['credit_days'] || $preview['institution'] !== $bill['institution'] || ( $preview['group_name'] ?? null ) !== ( $bill['group_name'] ?? null ) || ( $preview['billing_group'] ?? null ) !== ( $bill['billing_group'] ?? null ) || ( $preview['billing_members'] ?? null ) !== ( $bill['billing_members'] ?? null ) || ( $preview['shares'] ?? null ) !== ( $bill['shares'] ?? null ) ) {
 		return error( 'החיוב השתנה מאז הכנת הטיוטה. יש להכין מחדש את הטיוטה ולבדוק לפני אישור.', 409 );
 	}
 	if ( ! $bill['lines'] ) {
@@ -945,6 +988,7 @@ function record_payment( $bill_id, $input ) {
 	if ( ! isset( $bill['total'], $bill['institution'] ) || ! is_int( $bill['total'] ) || $bill['total'] < 0 || empty( $bill['institution'] ) ) {
 		throw new \RuntimeException( 'Approved payment snapshot is invalid.' );
 	}
+	billing_validate_bill( $bill );
 	$amount = money( $input['amount'] ?? '' );
 	$date   = $input['date'] ?? '';
 	$key    = $input['request_key'] ?? '';
@@ -973,44 +1017,95 @@ function record_payment( $bill_id, $input ) {
 	if ( $wpdb->num_queries <= $queries || $wpdb->last_error ) {
 		throw new \RuntimeException( 'Payment ledger lookup failed.' );
 	}
-	$paid = 0;
+	$paid       = 0;
+	$replayed   = null;
+	$group_paid = ! empty( $bill['billing_group'] ) ? array_fill_keys( $bill['billing_members'], 0 ) : array();
 	foreach ( array_chunk( $payments, 5000 ) as $batch ) {
 		foreach ( raw_records( $batch ) as $p ) {
 			if ( ! isset( $p['amount'], $p['bill'], $p['request_key'] ) || ! is_int( $p['amount'] ) || $p['amount'] <= 0 || ! is_string( $p['request_key'] ) || ( ! is_int( $p['bill'] ) && ! is_string( $p['bill'] ) ) || (string) $bill_id !== (string) $p['bill'] ) {
 				throw new \RuntimeException( 'Payment ledger snapshot is invalid.' );
 			}
+			if ( ! empty( $bill['billing_group'] ) ) {
+				if ( ( $p['billing_group'] ?? null ) !== $bill['billing_group'] || ( $p['billing_members'] ?? null ) !== $bill['billing_members'] || ! is_array( $p['allocations'] ?? null ) || array_keys( $p['allocations'] ) !== array_keys( $group_paid ) || array_sum( $p['allocations'] ) !== $p['amount'] ) {
+					throw new \RuntimeException( 'Grouped payment ledger is invalid.' );
+				}
+				foreach ( $p['allocations'] as $member => $allocation ) {
+					if ( ! is_int( $allocation ) || $allocation < 0 || $allocation > $bill['shares'][ $member ]['total'] - $group_paid[ $member ] ) {
+						throw new \RuntimeException( 'Grouped payment allocation is invalid.' );
+					}
+					$group_paid[ $member ] += $allocation;
+				}
+			}
 			if ( $p['request_key'] === $key ) {
 				if ( $p['amount'] !== $amount || ( $p['date'] ?? null ) !== $date || ( $p['method'] ?? null ) !== $method || ( $p['reference'] ?? null ) !== $reference ) {
 					return error( 'הניסיון הקודם כבר נשמר עם פרטי תשלום אחרים. יש לרענן ולבדוק את היתרה.', 409 );
 				}
-				return $p;
+				if ( empty( $bill['billing_group'] ) ) {
+					return $p;
+				}
+				$replayed = $p;
 			}
 			$paid += $p['amount'];
+		}
+	}
+	if ( ! empty( $bill['billing_group'] ) ) {
+		if ( $paid !== $bill['paid'] ) {
+			throw new \RuntimeException( 'Grouped payment total does not match ledger.' );
+		}
+		foreach ( $group_paid as $member => $allocation ) {
+			if ( $bill['shares'][ $member ]['paid'] !== $allocation ) {
+				throw new \RuntimeException( 'Grouped institution balance does not match ledger.' );
+			}
+		}
+		if ( $replayed ) {
+			return $replayed;
 		}
 	}
 	if ( $paid + $amount > $bill['total'] ) {
 		return error( 'התשלום גבוה מהיתרה.', 409 );
 	}
+	$group_payment = array();
+	if ( ! empty( $bill['billing_group'] ) ) {
+		foreach ( $group_paid as $member => $allocation ) {
+			if ( $bill['shares'][ $member ]['paid'] !== $allocation ) {
+				throw new \RuntimeException( 'Grouped bill and payment ledger disagree.' );
+			}
+		}
+		$allocations   = billing_allocate( $bill, $group_paid, $amount );
+		$group_payment = array(
+			'billing_group'   => $bill['billing_group'],
+			'group_name'      => $bill['group_name'],
+			'billing_members' => $bill['billing_members'],
+			'allocations'     => $allocations,
+		);
+		foreach ( $allocations as $member => $allocation ) {
+			$bill['shares'][ $member ]['paid'] = $group_paid[ $member ] + $allocation;
+		}
+	}
 	$payment = save_record(
 		'lcrm_payment',
-		array(
-			'institution'    => $bill['institution'],
-			'bill'           => $bill_id,
-			'amount'         => $amount,
-			'date'           => $date,
-			'method'         => $method,
-			'reference'      => $reference,
-			'request_key'    => $key,
-			'actor'          => get_current_user_id(),
-			'state'          => 'recorded',
-			'document_state' => 'not_connected',
+		array_merge(
+			$group_payment,
+			array(
+				'institution'    => $bill['institution'],
+				'bill'           => $bill_id,
+				'amount'         => $amount,
+				'date'           => $date,
+				'method'         => $method,
+				'reference'      => $reference,
+				'request_key'    => $key,
+				'actor'          => get_current_user_id(),
+				'state'          => 'recorded',
+				'document_state' => 'not_connected',
+			)
 		)
 	);
 	if ( is_wp_error( $payment ) ) {
 		return $payment;
 	}
 	$bill['paid'] = $paid + $amount;
-	$saved_bill   = save_record( 'lcrm_bill', $bill, $bill_id );
+	billing_validate_bill( $bill );
+	$saved_bill = save_record( 'lcrm_bill', $bill, $bill_id );
 	if ( is_wp_error( $saved_bill ) ) {
 		return $saved_bill;
 	} audit( 'payment_recorded', $bill_id, array( 'amount' => $amount ) );
@@ -1084,7 +1179,7 @@ function rollback_caches() {
 		clean_user_cache( $id );
 		wp_cache_delete( $id, 'user_meta' );
 	}
-	foreach ( array( 'lcrm_settings', 'lcrm_mapping_repair', 'lcrm_duplicate_index', 'lcrm_icount_config', 'lcrm_icount_automatic', 'lcrm_icount_namespace' ) as $option ) {
+	foreach ( array( 'lcrm_billing_groups', 'lcrm_settings', 'lcrm_mapping_repair', 'lcrm_duplicate_index', 'lcrm_icount_config', 'lcrm_icount_automatic', 'lcrm_icount_namespace' ) as $option ) {
 		wp_cache_delete( $option, 'options' );
 	}
 	wp_cache_delete( 'notoptions', 'options' );
