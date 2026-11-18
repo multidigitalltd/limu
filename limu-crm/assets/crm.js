@@ -17,7 +17,7 @@
     reports: "דוחות",
     capture: "טיפול בקליטה",
     institutions: "מוסדות ותעריפים",
-    groups: "קבוצות גבייה",
+    groups: "מוסדות ותעריפים / קבוצות גבייה",
     settings: "הגדרות והרשאות",
     audit: "יומן פעילות"
   };
@@ -96,8 +96,9 @@
     view = next;
     page = 1;
     filter = { ...emptyFilter(), ...selected };
-    document.querySelectorAll("[data-view]").forEach((x) => {
-      if (x.dataset.view === next) x.setAttribute("aria-current", "page");
+    const mainView = next === "groups" ? "institutions" : next;
+    document.querySelectorAll("#navigation [data-view]").forEach((x) => {
+      if (x.dataset.view === mainView) x.setAttribute("aria-current", "page");
       else x.removeAttribute("aria-current");
     });
     const ready = load();
@@ -1042,14 +1043,22 @@
     document.getElementById("institution-search").disabled = bulkRatesSaving;
     document.getElementById("institution-status").disabled = bulkRatesSaving;
   }
+  function institutionsHeading(active) {
+    return heading("מוסדות ותעריפים", "תעריפים, תנאי תשלום וזיהוי כפילויות לפי ההסכם עם כל מוסד") +
+      `<nav class="institution-sections actions" aria-label="ניווט במוסדות ותעריפים">
+        <button type="button" class="button" data-institution-view="institutions" ${active === "institutions" ? 'aria-current="page"' : ""}>תעריפי מוסדות</button>
+        <button type="button" class="button" data-institution-view="groups" ${active === "groups" ? 'aria-current="page"' : ""}>קבוצות גבייה</button>
+      </nav>`;
+  }
   async function billingGroupsView(token) {
-    if (!bootstrap.manager) throw new Error("אין הרשאה");
+    if (!bootstrap.manager) throw new Error("אין הרשאה לניהול קבוצות גבייה.");
     const result = await api("billing-groups");
     if (token !== generation) return;
-    screen.innerHTML = heading("קבוצות גבייה", "מוסדות נפרדים עם חיוב חודשי אחד וגורם משלם משותף", '<button class="button primary" id="new-billing-group">קבוצת גבייה חדשה</button>') +
+    screen.innerHTML = institutionsHeading("groups") +
+      '<div class="page-heading"><h2>קבוצות גבייה</h2><div class="actions"><button type="button" class="button primary" id="new-billing-group">קבוצת גבייה חדשה</button></div></div>' +
       '<p class="callout">לכל מוסד נשמרים התעריף, הזכאות וכללי הכפילות שלו. אותה פנייה לשני מוסדות יכולה להתחייב אצל כל אחד. תשלום חלקי מחולק יחסית ליתרות, באגורות מדויקות. חיובי עבר נשמרים; כל קבוצה מתחילה בחודש שנבחר.</p>' +
       (result.items.length ? `<div class="institution-grid">${result.items.map((group) => `<section class="card">
-        <h2>${e(group.name)}</h2><p>${group.members.map((id) => e(name(id))).join(" · ")}</p>
+        <h3>${e(group.name)}</h3><p>${group.members.map((id) => e(name(id))).join(" · ")}</p>
         <p>גורם משלם ולקוח iCount: ${e(name(group.payer))}</p><p>תחילה: ${e(group.from)} · ${e(group.credit_days)} ימי אשראי</p>
         <p>${group.cancelled ? "בוטלה לפני הכנת חיובים" : group.until ? "חודש סיום (כולל): " + e(group.until) : "ללא חודש סיום"}</p>
         ${!group.cancelled && !group.until ? `<div class="actions"><button class="button" data-close-group="${e(group.id)}">קביעת חודש סיום</button><button class="button" data-cancel-group="${e(group.id)}">ביטול קבוצה שטרם חויבה</button></div>` : ""}</section>`).join("")}</div>` : empty("טרם הוגדרו קבוצות גבייה"));
@@ -1084,7 +1093,7 @@
     if (token !== generation) return;
     if (!bootstrap.manager) throw new Error("אין הרשאה לניהול מוסדות ותעריפים.");
     selectedInstitutions.clear();
-    screen.innerHTML = heading("מוסדות ותעריפים", "תעריפים, תנאי תשלום וזיהוי כפילויות לפי ההסכם עם כל מוסד") + `<div class="filters">
+    screen.innerHTML = institutionsHeading("institutions") + `<div class="filters">
       <div>
       <label for="institution-search">חיפוש מוסד</label>
       <input id="institution-search" type="search" placeholder="שם המוסד"></div>
@@ -1530,6 +1539,10 @@
     const b = ev.target.closest("[data-view]");
     if (!b) return;
     navigate(b.dataset.view);
+  });
+  screen.addEventListener("click", (event) => {
+    const button = event.target.closest(".institution-sections [data-institution-view]");
+    if (button && button.dataset.institutionView !== view) navigate(button.dataset.institutionView);
   });
   refreshBootstrap().then(load).catch((err) => {
     screen.setAttribute("aria-busy", "false");

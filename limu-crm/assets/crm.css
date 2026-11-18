@@ -35,14 +35,14 @@
 .lcrm .sidebar > .brand { display: flex; justify-content: center; padding: 10px 8px 27px; margin-block-end: 22px; border-block-end: 1px solid var(--line); }
 .lcrm .brand-logo { display: block; width: 184px; max-width: 100%; height: auto; }
 .lcrm .sidebar-caption { font-size: 13px; font-weight: 400; color: var(--muted); margin: 0 12px 13px; }
-.lcrm nav { display: grid; gap: 6px; }
-.lcrm nav button { position: relative; border: 1px solid transparent; background: transparent; color: #52617a; text-align: start; padding: 9px 11px; border-radius: 12px; display: flex; align-items: center; gap: 11px; min-height: 54px; font-size: 16px; font-weight: 400; transition: background .15s ease, border-color .15s ease, color .15s ease; }
-.lcrm nav button:hover { background: #f4f6fc; color: var(--brand-dark); }
-.lcrm nav button[aria-current=page] { background: var(--tint); border-color: var(--tint-line); color: var(--brand-dark); font-weight: 700; }
-.lcrm nav button[aria-current=page]::before { content: ""; position: absolute; inset-inline-start: -1px; inset-block: 15px; width: 3px; border-radius: 3px; background: var(--brand); }
+.lcrm .sidebar nav { display: grid; gap: 6px; }
+.lcrm .sidebar nav button { position: relative; border: 1px solid transparent; background: transparent; color: #52617a; text-align: start; padding: 9px 11px; border-radius: 12px; display: flex; align-items: center; gap: 11px; min-height: 54px; font-size: 16px; font-weight: 400; transition: background .15s ease, border-color .15s ease, color .15s ease; }
+.lcrm .sidebar nav button:hover { background: #f4f6fc; color: var(--brand-dark); }
+.lcrm .sidebar nav button[aria-current=page], .lcrm .institution-sections .button[aria-current=page] { background: var(--tint); border-color: var(--tint-line); color: var(--brand-dark); font-weight: 700; }
+.lcrm .sidebar nav button[aria-current=page]::before { content: ""; position: absolute; inset-inline-start: -1px; inset-block: 15px; width: 3px; border-radius: 3px; background: var(--brand); }
 .lcrm .nav-icon { flex: 0 0 35px; height: 35px; border-radius: 10px; background: #f3f6fc; color: #6174a0; display: grid; place-items: center; }
 .lcrm .nav-icon svg { width: 20px; height: 20px; display: block; }
-.lcrm nav button[aria-current=page] .nav-icon { background: var(--brand); color: #fff; box-shadow: 0 3px 8px #4f5da81c; }
+.lcrm .sidebar nav button[aria-current=page] .nav-icon { background: var(--brand); color: #fff; box-shadow: 0 3px 8px #4f5da81c; }
 .lcrm .sidebar-bottom { margin-block-start: auto; padding: 19px 8px 0; border-block-start: 1px solid var(--line); display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
 .lcrm .avatar { display: grid; place-items: center; width: 40px; height: 40px; border: 1px solid var(--tint-line); border-radius: 50%; color: var(--brand-dark); background: var(--tint); flex-shrink: 0; }
 .lcrm .avatar svg { width: 21px; height: 21px; }
@@ -180,7 +180,8 @@
 .lcrm .institution-grid .card { margin: 0; display: flex; flex-direction: column; }
 .lcrm .institution-grid .card .button { margin-block-start: auto; align-self: start; }
 .lcrm .institution-grid .card p { margin-block-end: 15px; }
-.lcrm .institution-grid h2 { font-size: 22px; }
+.lcrm .institution-sections { margin-block-end: 20px; }
+.lcrm .institution-grid h2, .lcrm .institution-grid h3 { font-size: 22px; margin-block-start: 0; }
 .lcrm .institution-head { display: flex; align-items: center; gap: 10px; margin-block-end: 20px; }
 .lcrm .institution-mark { display: grid; place-items: center; border: 1px solid var(--tint-line); border-radius: 12px; background: var(--tint); color: var(--brand-dark); height: 46px; width: 46px; flex-shrink: 0; font-size: 22px; font-weight: 700; }
 .lcrm .rate-value { display: block; font-size: 34px; line-height: 1.2; font-weight: 750; letter-spacing: -.75px; font-variant-numeric: tabular-nums; }
@@ -288,7 +289,7 @@
 @media (max-width: 1280px) {
   .lcrm .app-shell { grid-template-columns: 226px minmax(0, 1fr); }
   .lcrm .sidebar { padding-inline: 13px; }
-  .lcrm nav button { font-size: 15px; gap: 9px; padding-inline: 9px; }
+  .lcrm .sidebar nav button { font-size: 15px; gap: 9px; padding-inline: 9px; }
   .lcrm .workspace > main#main { padding: 30px 26px 42px; }
   .lcrm .topbar { padding-inline: 26px; gap: 14px; }
   .lcrm .topbar-user > span:not(.avatar) { display: none; }

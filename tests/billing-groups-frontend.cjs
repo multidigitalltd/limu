@@ -11,7 +11,7 @@ const assert=require('node:assert/strict');
  const errors=[];page.on('pageerror',error=>errors.push(error.message));let count=0;
  const check=(ok,label)=>{assert.ok(ok,label);++count;console.log('PASS '+label);};
  const bootstrap={manager:true,name:'Synthetic manager',today:'2026-11-18',month:'2026-11',settings:{start_date:'2020-01-01',automatic:false,audit_retention_days:0},icount:{configured:true,verified:true,automatic:false,bank_accounts:[]},institutions:[{id:1,name:'מוסד א',icount_client:{id:700},agreement:{credit_days:30,rates:[{from:'2020-01-01',price:1000}]}},{id:2,name:'מוסד ב',agreement:{credit_days:14,rates:[{from:'2020-01-01',price:2000}]}}]};
- let groups=[],createPayload,closePayload,paymentPayload,approvePayload,issuePayload,mode='normal',createCount=0;
+ let groups=[],createPayload,closePayload,paymentPayload,approvePayload,issuePayload,mode='normal',createCount=0,groupReads=0;
  const bill={id:100,approval_revision:'a'.repeat(64),institution:1,billing_group:'group-fixture',group_name:'גבייה משותפת',billing_members:[1,2],month:'2026-10',state:'approved',subtotal:3000,vat:540,total:3540,paid:1001,due:'2026-12-02',issued:'2026-11-18',credit_days:14,duplicates:0,historical:0,documents:[],shares:{1:{name:'מוסד א',count:1,total:1180,paid:334},2:{name:'מוסד ב',count:1,total:2360,paid:667}},lines:[{delivery:11,institution:1,institution_name:'מוסד א',price:1000},{delivery:12,institution:2,institution_name:'מוסד ב',price:2000}]};
  const json=(route,data,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(data)});
  async function axe(label){if(!process.env.LIMU_AXE_PATH)return;await page.evaluate(source=>{if(window.axe)return;const script=document.createElement('script'),nonce=document.querySelector('script[nonce]');if(nonce)script.nonce=nonce.nonce;script.textContent=source;document.head.append(script);script.remove();},fs.readFileSync(process.env.LIMU_AXE_PATH,'utf8'));const violations=await page.evaluate(async()=> (await window.axe.run(document.body,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa','wcag22aa']}})).violations);check(!violations.length,label+': '+JSON.stringify(violations.map(v=>({id:v.id,nodes:v.nodes.map(n=>n.target)}))));}
@@ -22,7 +22,7 @@ const assert=require('node:assert/strict');
   if(endpoint==='bootstrap')return json(route,bootstrap);
   if(endpoint==='summary')return json(route,{leads:0,received_leads:0,institution_leads:0,approved:3540,paid:1001,overdue:0,draft:0,by_institution:{},capture_pending:0});
   if(endpoint==='billing-groups'){
-   if(route.request().method()==='GET')return json(route,{items:groups});
+   if(route.request().method()==='GET'){++groupReads;return json(route,{items:groups});}
    const payload=route.request().postDataJSON();
    if(mode==='error')return json(route,{message:'מוסד כבר משויך לקבוצה'},409);
    if(payload.until||payload.cancelled){closePayload=payload;Object.assign(groups.find(g=>g.id===payload.id),payload);return json(route,groups[0]);}
@@ -44,8 +44,14 @@ const assert=require('node:assert/strict');
   await page.locator('#user_login').fill(credentials.user);await page.locator('#user_pass').fill(credentials.password);await page.getByRole('button',{name:'כניסה למערכת',exact:true}).click();
  }
  await page.getByRole('heading',{name:'סקירה כללית',exact:true}).waitFor();
- await page.locator('[data-view="groups"]').focus();await page.keyboard.press('Enter');await page.getByRole('heading',{name:'קבוצות גבייה',exact:true}).waitFor();
- check(await page.getByText('טרם הוגדרו קבוצות גבייה',{exact:true}).isVisible(),'Manager reaches empty billing-group screen by keyboard');await axe('Group screen accessibility');
+ const institutions=page.locator('#navigation [data-view="institutions"]');
+ const sections=page.getByRole('navigation',{name:'ניווט במוסדות ותעריפים'});
+ const groupsTab=sections.getByRole('button',{name:'קבוצות גבייה',exact:true});
+ const tariffTab=sections.getByRole('button',{name:'תעריפי מוסדות',exact:true});
+ await institutions.click();await tariffTab.waitFor();
+ check(await page.locator('#navigation [data-view="groups"]').count()===0&&groupReads===0,'Groups are absent from the main menu and load only on demand');
+ await groupsTab.focus();await page.keyboard.press('Enter');await page.getByRole('heading',{name:'קבוצות גבייה',exact:true}).waitFor();
+ check(await page.getByText('טרם הוגדרו קבוצות גבייה',{exact:true}).isVisible()&&await institutions.getAttribute('aria-current')==='page'&&await groupsTab.getAttribute('aria-current')==='page','Manager reaches the group section by keyboard with Institutions active');await axe('Group screen accessibility');
  await page.locator('#new-billing-group').click();
  await page.locator('#group-name').fill('גבייה משותפת');await page.locator('#group-members').selectOption(['1','2']);await page.locator('#group-payer').selectOption('1');await page.locator('#group-credit').fill('14');
  await axe('Group creation form accessibility');
@@ -73,8 +79,10 @@ const assert=require('node:assert/strict');
  await page.locator('#filter-institution').selectOption('');await page.getByRole('button',{name:'הצגת נתונים',exact:true}).click();await ready();await page.locator('.bill-check').check();await page.locator('#approve').click();
  check((await page.locator('#modal-content').textContent()).includes('האישור כולל חיובים משותפים'),'Approval confirmation identifies combined charges');
  await page.locator('#approve-form button[type=submit]').click();await ready();check(approvePayload.ids[0]===100&&approvePayload.shared_billing===true&&approvePayload.billing_previews['100']==='a'.repeat(64),'Whole-group approval posts explicit group-aware acknowledgement');
- groups[0].name='<img src=x onerror="window.__groupXss=true">';await page.locator('[data-view="groups"]').click();await page.getByRole('heading',{name:'קבוצות גבייה',exact:true}).waitFor();
+ groups[0].name='<img src=x onerror="window.__groupXss=true">';await institutions.click();await groupsTab.click();await page.getByRole('heading',{name:'קבוצות גבייה',exact:true}).waitFor();
  check(await page.locator('#screen img').count()===0&&!await page.evaluate(()=>window.__groupXss),'Group names remain escaped text');
+ await tariffTab.click();await page.locator('#institution-search').waitFor();
+ check(await tariffTab.getAttribute('aria-current')==='page'&&await page.locator('#new-billing-group').count()===0,'The tariff section remains accessible from the group section');
  check(!errors.length,'No browser runtime errors: '+errors.join('; '));console.log(`${count} shared billing frontend checks passed.`);
  }finally{await browser.close();}
 })().catch(error=>{console.error(error.message);process.exit(1);});
