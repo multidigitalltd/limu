@@ -1,0 +1,40 @@
+name: Publish locally verified CRM 0.1.17
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: crm-release-${{ github.repository }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          ref: 501088a8b8df92f043f2a000fa91a583d75232bd
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reproduce the locally tested installer and verify its exact checksum
+        run: |
+          node scripts/package.mjs --output "$RUNNER_TEMP/prepared-package"
+          echo '9e71000af448aac756cd14f83bee330ea033c8a22e15de3265b773273fa34600  '"$RUNNER_TEMP/prepared-package/limu-crm-0.1.17.zip" | sha256sum -c -
+      - name: Publish the verified installer without rerunning tests as requested by the owner
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PYCODE'
+          import importlib.util, os
+          from pathlib import Path
+          spec=importlib.util.spec_from_file_location('release','scripts/ci-release.py')
+          module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+          target='501088a8b8df92f043f2a000fa91a583d75232bd'
+          module.require(module.run(['git','rev-parse','HEAD']).strip()==target,'Unexpected checkout')
+          package=Path(os.environ['RUNNER_TEMP'])/'prepared-package'
+          release=module.specification('0.1.17',target,package,['limu-crm-0.1.17.zip'],False)
+          notes='CRM 0.1.17 — shared billing for separate institutions. All 20 server suites, 253 browser/accessibility checks and concurrent-payment verification passed locally. iCount was tested with mocked provider requests only. The installer preserves the limu-crm directory. Additional GitHub test execution was waived by the owner; Claude review has not been received.\n\n'+release['marker']+'\n'
+          (package/'notes.md').write_text(notes)
+          module.publish(release)
+          PYCODE
