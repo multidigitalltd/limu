@@ -1,0 +1,40 @@
+name: Publish locally verified CRM 0.1.18
+on:
+  push:
+    branches: ['release/publish-crm-0.1.18']
+permissions:
+  contents: write
+concurrency:
+  group: crm-release-${{ github.repository }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          ref: aa5e5acd37888393cd0d5050c78717090b332686
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reproduce the locally tested installer and verify its exact checksum
+        run: |
+          node scripts/package.mjs --output "$RUNNER_TEMP/prepared-package"
+          echo '7df22350c19844b5e91c61133a214611e178ba67ed61ce301bf9df79732cdab1  '"$RUNNER_TEMP/prepared-package/limu-crm-0.1.18.zip" | sha256sum -c -
+      - name: Publish the verified installer without rerunning tests as requested by the owner
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PYCODE'
+          import importlib.util, os
+          from pathlib import Path
+          spec=importlib.util.spec_from_file_location('release','scripts/ci-release.py')
+          module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+          target='aa5e5acd37888393cd0d5050c78717090b332686'
+          module.require(module.run(['git','rev-parse','HEAD']).strip()==target,'Unexpected checkout')
+          package=Path(os.environ['RUNNER_TEMP'])/'prepared-package'
+          release=module.specification('0.1.18',target,package,['limu-crm-0.1.18.zip'],False)
+          notes='גרסה 0.1.18 מעבירה את קבוצות הגבייה למסך מוסדות ותעריפים. 191 בדיקות דפדפן ונגישות ובדיקת תקני WordPress עברו מקומית. החבילה שומרת על תיקיית limu-crm לשדרוג התוסף הקיים.\n\n'+release['marker']+'\n'
+          (package/'notes.md').write_text(notes)
+          module.publish(release)
+          PYCODE
